@@ -19,10 +19,14 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -55,6 +59,7 @@ fun MainScreen(
     onDecline: (String) -> Unit,
     onCancel: () -> Unit,
     onOpenHistoryEntry: (HistoryEntry) -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     val canSend = state.staged.isNotEmpty() &&
         state.selectedPeerId != null &&
@@ -74,6 +79,7 @@ fun MainScreen(
                 sharingOn = state.sharingOn,
                 onStopSharing = onStopSharing,
                 onStartSharing = onStartSharing,
+                onOpenSettings = onOpenSettings,
             )
             Spacer(Modifier.height(8.dp))
             Hairline()
@@ -200,6 +206,7 @@ private fun Header(
     sharingOn: Boolean,
     onStopSharing: () -> Unit,
     onStartSharing: () -> Unit,
+    onOpenSettings: () -> Unit,
 ) {
     var menu by remember { mutableStateOf(false) }
     Row(
@@ -252,6 +259,16 @@ private fun Header(
                     )
                 }
             }
+        }
+        IconButton(
+            onClick = onOpenSettings,
+            modifier = Modifier.size(40.dp),
+        ) {
+            Icon(
+                imageVector = Icons.Default.Settings,
+                contentDescription = "Settings",
+                tint = MochaMuted,
+            )
         }
     }
 }

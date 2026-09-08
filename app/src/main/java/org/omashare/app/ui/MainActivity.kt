@@ -15,6 +15,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.WindowCompat
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import org.omashare.app.BuildConfig
 import androidx.core.content.ContextCompat
 import org.omashare.app.service.ShareService
 import org.omashare.app.service.ShareStore
@@ -53,28 +57,43 @@ class MainActivity : ComponentActivity() {
         }
         setContent {
             val state by ShareStore.state.collectAsState()
-            OmashareTheme {
-                MainScreen(
-                    state = state,
-                    onSelectFiles = { pickFiles.launch(arrayOf("*/*")) },
-                    onClearSelection = { ShareStore.clearStaged() },
-                    onPeerSelected = { peer -> ShareStore.setSelectedPeer(peer.endpointId) },
-                    onSend = { sendToSelected() },
-                    onStopSharing = { ShareService.stop(this) },
-                    onStartSharing = { startSharing() },
-                    onAccept = { sid ->
-                        ShareStore.setIncoming(null)
-                        ShareService.accept(this, sid)
-                    },
-                    onDecline = { sid ->
-                        ShareStore.setIncoming(null)
-                        ShareService.decline(this, sid)
-                    },
-                    onCancel = {
-                        ShareService.cancel(this, ShareStore.state.value.transfer?.sessionId)
-                    },
-                    onOpenHistoryEntry = { entry -> FileOpener.open(this, entry) },
-                )
+            var appTheme by remember { mutableStateOf(ThemePreferences.load(this)) }
+            var showSettings by remember { mutableStateOf(false) }
+            OmashareTheme(theme = appTheme) {
+                if (showSettings) {
+                    SettingsScreen(
+                        currentTheme = appTheme,
+                        versionName = BuildConfig.VERSION_NAME,
+                        onThemeSelected = { theme ->
+                            appTheme = theme
+                            ThemePreferences.save(this, theme)
+                        },
+                        onBack = { showSettings = false },
+                    )
+                } else {
+                    MainScreen(
+                        state = state,
+                        onSelectFiles = { pickFiles.launch(arrayOf("*/*")) },
+                        onClearSelection = { ShareStore.clearStaged() },
+                        onPeerSelected = { peer -> ShareStore.setSelectedPeer(peer.endpointId) },
+                        onSend = { sendToSelected() },
+                        onStopSharing = { ShareService.stop(this) },
+                        onStartSharing = { startSharing() },
+                        onAccept = { sid ->
+                            ShareStore.setIncoming(null)
+                            ShareService.accept(this, sid)
+                        },
+                        onDecline = { sid ->
+                            ShareStore.setIncoming(null)
+                            ShareService.decline(this, sid)
+                        },
+                        onCancel = {
+                            ShareService.cancel(this, ShareStore.state.value.transfer?.sessionId)
+                        },
+                        onOpenHistoryEntry = { entry -> FileOpener.open(this, entry) },
+                        onOpenSettings = { showSettings = true },
+                    )
+                }
             }
         }
         ensurePermsThenStart()

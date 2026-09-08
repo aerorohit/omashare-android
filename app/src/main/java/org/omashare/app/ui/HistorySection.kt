@@ -2,6 +2,7 @@ package org.omashare.app.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -9,11 +10,17 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
@@ -22,6 +29,8 @@ import androidx.compose.ui.unit.sp
 import org.omashare.app.service.HistoryEntry
 import org.omashare.app.service.ShareStore
 import org.omashare.app.share.FileStager
+import org.omashare.app.share.imageFiles
+import org.omashare.app.share.isImageFileName
 
 @Composable
 fun SelectionCard(
@@ -29,6 +38,10 @@ fun SelectionCard(
     onClear: () -> Unit,
 ) {
     val totalSize = staged.sumOf { it.size }
+    val images = imageFiles(staged)
+    val nonImages = staged.filter { !isImageFileName(it.name) }
+    var previewFile by remember(staged) { mutableStateOf<ShareStore.StagedFile?>(null) }
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -54,13 +67,79 @@ fun SelectionCard(
             color = MochaText,
             fontSize = 14.sp,
         )
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = staged.joinToString("\n") { it.name },
-            color = MochaMuted,
-            fontSize = 13.sp,
-            maxLines = 4,
-            overflow = TextOverflow.Ellipsis,
+        if (images.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            when {
+                images.size == 1 && nonImages.isEmpty() -> {
+                    val file = images.first()
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        FileThumbnail(
+                            path = file.path,
+                            size = 72.dp,
+                            onClick = { previewFile = file },
+                        )
+                        Text(
+                            text = file.name,
+                            color = MochaMuted,
+                            fontSize = 13.sp,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                    }
+                }
+                else -> {
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        items(images, key = { it.path }) { file ->
+                            FileThumbnail(
+                                path = file.path,
+                                size = 72.dp,
+                                onClick = { previewFile = file },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        if (nonImages.isNotEmpty() || (images.size > 1 && nonImages.isNotEmpty())) {
+            Spacer(modifier = Modifier.height(8.dp))
+            val names = when {
+                images.size > 1 && nonImages.isNotEmpty() -> nonImages.joinToString("\n") { it.name }
+                nonImages.isNotEmpty() -> nonImages.joinToString("\n") { it.name }
+                images.size > 1 -> images.joinToString("\n") { it.name }
+                else -> ""
+            }
+            if (names.isNotEmpty()) {
+                Text(
+                    text = names,
+                    color = MochaMuted,
+                    fontSize = 13.sp,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        } else if (images.isEmpty()) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Text(
+                text = staged.joinToString("\n") { it.name },
+                color = MochaMuted,
+                fontSize = 13.sp,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+
+    previewFile?.let { file ->
+        ImagePreviewDialog(
+            path = file.path,
+            fileName = file.name,
+            onDismiss = { previewFile = null },
         )
     }
 }
