@@ -65,7 +65,7 @@ Do not fork LocalSend. Speak **Omashare only**.
                 │ binder / app singleton
 ┌───────────────▼─────────────────────────────┐
 │  ShareService  (foreground)                 │
-│  NsdDiscovery  ·  multicast lock            │
+│  NsdDiscovery  ·  BleDiscovery  ·  multicast lock │
 │  UniFFI OmashareNode  (same core as CLI)    │
 └───────────────┬─────────────────────────────┘
                 │ Omashare protocol
@@ -87,6 +87,8 @@ Build: this repo vendors or CI-builds `libomashare_ffi.so` from `omashare`
 From `omashare` README / `protocol.rs`:
 
 - Discovery UDP/TCP **53318**, multicast `224.0.0.169`, `GET /omashare/info`
+- BLE: service `6f6d6173-6861-7265-0000-000000005318`, GATT Presence on `…5319`
+  (handshake only; bytes still iroh LAN/WAN/relay)
 - Offer ALPN `omashare/offer/0`
 - Payload `iroh-blobs`
 - Device kind: `mobile`
@@ -98,6 +100,8 @@ Phone↔phone requirements (must work with two copies of this app):
 3. Both hold a Wi-Fi multicast lock while sharing is on.
 4. `injectPeer` with Iroh `addrs` from `/omashare/info` so magicsock can go LAN.
 5. Relays enabled so AP isolation / bad multicast still has a fallback.
+6. BLE advertise/scan while sharing is on; GATT Presence → `injectPeer` (`bluetooth`)
+   so two phones meet without the same Wi-Fi, then transfer over WAN/relay.
 
 If two phones on the same LAN cannot see each other, fix NSD + info fetch +
 addr rewrite first — not the UI.
@@ -124,7 +128,7 @@ Flows:
    Accept / Decline. Progress. Files land in public Downloads/`Omashare`.
 3. **Share sheet** — files already selected; this screen is only the peer list.
 4. **Empty nearby** — one line: “Waiting for devices on this network…”
-   No fake radar animation.
+   No fake radar animation. BLE-discovered peers appear in the same list.
 
 Sharing stays on while the service runs. A single toggle in a tiny overflow
 menu: Stop sharing (stops the service). v1 does not add network-type toggles.
@@ -136,7 +140,8 @@ Notifications:
 - Transfer complete / failed
 
 Permissions (minimum): notifications, nearby Wi-Fi / location as required
-by `NsdManager` on the target SDK, read URIs via SAF. No VPN permission.
+by `NsdManager` on the target SDK, Bluetooth scan/advertise/connect (never for
+location), read URIs via SAF. No VPN permission.
 
 ## Visual design (Omarchy)
 
@@ -169,7 +174,7 @@ default dynamic wallpaper scheme.
 ```
 app/
   ui/          MainScreen, OfferSheet, theme
-  service/     ShareService, NsdDiscovery
+  service/     ShareService, NsdDiscovery, BleDiscovery
   share/       Send/Share activities, SAF staging
   ffi/         generated UniFFI (generated/)
 ```

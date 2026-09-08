@@ -11,6 +11,7 @@ object ShareStore {
         val endpointId: String,
         val deviceKind: String,
         val addrs: List<String>,
+        val source: String = "",
     )
 
     data class StagedFile(

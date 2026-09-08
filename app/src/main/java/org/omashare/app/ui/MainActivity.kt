@@ -132,10 +132,6 @@ class MainActivity : ComponentActivity() {
             ShareStore.setStatus("Select files first")
             return
         }
-        if (peer.addrs.isEmpty()) {
-            ShareStore.setStatus("${peer.alias} has no network address yet — wait a moment")
-            return
-        }
         if (state.transfer != null) {
             ShareStore.setStatus("Already transferring")
             return
@@ -202,6 +198,11 @@ class MainActivity : ComponentActivity() {
             needed.add(Manifest.permission.NEARBY_WIFI_DEVICES)
         } else {
             needed.add(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        if (Build.VERSION.SDK_INT >= 31) {
+            needed.add(Manifest.permission.BLUETOOTH_SCAN)
+            needed.add(Manifest.permission.BLUETOOTH_ADVERTISE)
+            needed.add(Manifest.permission.BLUETOOTH_CONNECT)
         }
         return needed
     }

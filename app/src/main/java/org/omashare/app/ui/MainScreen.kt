@@ -282,6 +282,13 @@ private fun PeerRow(
     val isMobile = peer.deviceKind.contains("mobile", ignoreCase = true)
     val deviceIcon = if (isMobile) "📱" else "💻"
     val kindLabel = peer.deviceKind.ifEmpty { "unknown" }
+    val sourceLabel = when (peer.source) {
+        "bluetooth" -> "bt"
+        "mdns", "native_dns_sd" -> "mdns"
+        "multicast", "subnet_scan" -> "lan"
+        else -> ""
+    }
+    val badge = if (sourceLabel.isEmpty()) kindLabel else "$kindLabel · $sourceLabel"
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -308,7 +315,7 @@ private fun PeerRow(
                 color = if (selected) MochaAccent else MochaText,
                 fontSize = 16.sp,
             )
-            if (peer.addrs.isEmpty()) {
+            if (peer.addrs.isEmpty() && peer.source != "bluetooth") {
                 Text(
                     text = "waiting for address…",
                     color = MochaMuted,
@@ -318,7 +325,7 @@ private fun PeerRow(
         }
         Spacer(Modifier.width(8.dp))
         Text(
-            text = kindLabel,
+            text = badge,
             color = MochaMuted,
             fontSize = 11.sp,
             modifier = Modifier

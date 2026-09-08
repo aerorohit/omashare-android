@@ -36,7 +36,8 @@ Needs `cargo-ndk` and the NDK path above.
 
 ## Run
 
-Install on a phone, grant nearby Wi-Fi (or location on older Android) and
-notifications, leave sharing on. Two phones on the same LAN should appear in
-Nearby; tap **Send files**, then a peer. Incoming offers show in-app and as
-notification actions.
+Install on a phone, grant nearby Wi-Fi (or location on older Android), Bluetooth
+scan/advertise/connect, and notifications. Leave sharing on. Peers appear from
+LAN (NSD) or Bluetooth; tap **Send files**, then a peer. Incoming offers show
+in-app and as notification actions. Bluetooth is discovery only — the file still
+goes over iroh (LAN, WAN, or n0 relay).

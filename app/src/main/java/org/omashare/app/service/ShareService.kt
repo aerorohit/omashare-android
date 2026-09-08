@@ -29,6 +29,7 @@ import java.util.concurrent.Executors
 class ShareService : Service(), EventSink {
     private var node: OmashareNode? = null
     private var nsd: NsdDiscovery? = null
+    private var ble: BleDiscovery? = null
     private var cmCallback: ConnectivityManager.NetworkCallback? = null
     @Volatile private var starting = false
     private var multicastLock: WifiManager.MulticastLock? = null
@@ -56,7 +57,11 @@ class ShareService : Service(), EventSink {
             NOTIFY_SHARE,
             notification("Omashare is sharing"),
             if (Build.VERSION.SDK_INT >= 29) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                if (Build.VERSION.SDK_INT >= 34) {
+                    types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                }
+                types
             } else {
                 0
             },
@@ -138,6 +143,14 @@ class ShareService : Service(), EventSink {
             }.also {
                 it.advertise(Build.MODEL, eid, 53318)
                 it.browse()
+            }
+            ble = BleDiscovery(this) { alias, peerEid, addrs, pin, kind ->
+                io.execute {
+                    n.injectPeer(alias, peerEid, addrs, pin, "bluetooth", kind)
+                }
+            }.also { disc ->
+                disc.setPayload(localPresenceJson(eid))
+                disc.start()
             }
             lastWifi = true
             watchNetwork(n)
@@ -462,6 +475,7 @@ class ShareService : Service(), EventSink {
                 endpointId = p.optString("endpoint_id"),
                 deviceKind = p.optString("device_kind").ifEmpty { "unknown" },
                 addrs = addrs,
+                source = p.optString("source"),
             )
             val key = peer.alias.lowercase()
             val prev = byAlias[key]
@@ -476,6 +490,11 @@ class ShareService : Service(), EventSink {
         io.execute {
             val json = node?.nearbyJson() ?: return@execute
             applyNearby(JSONArray(json))
+            val n = node
+            val disc = ble
+            if (n != null && disc != null) {
+                disc.setPayload(localPresenceJson(n.endpointId()))
+            }
         }
     }
 
@@ -510,8 +529,14 @@ class ShareService : Service(), EventSink {
         nsdHostPort(host, irohPort)?.let { lan ->
             if (!addrs.contains(lan)) addrs.add(0, lan)
         }
-        if (addrs.isEmpty()) return
-        n.injectPeer(name, eid, addrs, info.optBoolean("pin_required"))
+        n.injectPeer(
+            name,
+            eid,
+            addrs,
+            info.optBoolean("pin_required"),
+            "native_dns_sd",
+            info.optString("device_kind").ifEmpty { "unknown" },
+        )
     }
 
     private fun nsdHostPort(host: String, irohPort: String?): String? {
@@ -524,8 +549,8 @@ class ShareService : Service(), EventSink {
         }
     }
 
-    private fun fetchOmashareInfo(host: String, port: Int): JSONObject? {
-        repeat(5) { attempt ->
+    private fun fetchOmashareInfo(host: String, port: Int, attempts: Int = 5): JSONObject? {
+        repeat(attempts) { attempt ->
             try {
                 val url = java.net.URL("http://$host:$port/omashare/info")
                 val conn = url.openConnection() as java.net.HttpURLConnection
@@ -534,7 +559,7 @@ class ShareService : Service(), EventSink {
                 conn.requestMethod = "GET"
                 return conn.inputStream.bufferedReader().use { JSONObject(it.readText()) }
             } catch (_: Exception) {
-                if (attempt < 4) Thread.sleep(400)
+                if (attempt < attempts - 1) Thread.sleep(400)
             }
         }
         return null
@@ -552,6 +577,19 @@ class ShareService : Service(), EventSink {
         val outIp = if (useHost) host else ip
         if (outIp == "127.0.0.1" || outIp == "::1") return null
         return "$outIp:$p"
+    }
+
+    private fun localPresenceJson(eid: String): JSONObject {
+        val info = fetchOmashareInfo("127.0.0.1", 53318, attempts = 1)
+        if (info != null && info.optString("endpoint_id").isNotEmpty()) {
+            return info
+        }
+        return JSONObject()
+            .put("alias", Build.MODEL)
+            .put("device_kind", "mobile")
+            .put("endpoint_id", eid)
+            .put("pin_required", false)
+            .put("addrs", org.json.JSONArray())
     }
 
     private fun parseFiles(obj: JSONObject): List<ShareStore.OfferedFile> {
@@ -707,6 +745,8 @@ class ShareService : Service(), EventSink {
     private fun teardown() {
         nsd?.stop()
         nsd = null
+        ble?.stop()
+        ble = null
         cmCallback?.let { runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) } }
         cmCallback = null
         multicastLock?.release()

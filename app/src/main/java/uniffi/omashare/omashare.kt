@@ -872,7 +872,7 @@ fun uniffi_omashare_ffi_fn_method_omasharenode_decline_offer(`ptr`: Pointer,`ses
 ): Unit
 fun uniffi_omashare_ffi_fn_method_omasharenode_endpoint_id(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-fun uniffi_omashare_ffi_fn_method_omasharenode_inject_peer(`ptr`: Pointer,`alias`: RustBuffer.ByValue,`endpointId`: RustBuffer.ByValue,`addrs`: RustBuffer.ByValue,`pinRequired`: Byte,uniffi_out_err: UniffiRustCallStatus, 
+fun uniffi_omashare_ffi_fn_method_omasharenode_inject_peer(`ptr`: Pointer,`alias`: RustBuffer.ByValue,`endpointId`: RustBuffer.ByValue,`addrs`: RustBuffer.ByValue,`pinRequired`: Byte,`source`: RustBuffer.ByValue,`deviceKind`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 fun uniffi_omashare_ffi_fn_method_omasharenode_nearby_json(`ptr`: Pointer,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1029,7 +1029,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_omashare_ffi_checksum_method_omasharenode_endpoint_id() != 58460.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_omashare_ffi_checksum_method_omasharenode_inject_peer() != 32297.toShort()) {
+    if (lib.uniffi_omashare_ffi_checksum_method_omasharenode_inject_peer() != 47217.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_omashare_ffi_checksum_method_omasharenode_nearby_json() != 4130.toShort()) {
@@ -1421,7 +1421,7 @@ public interface OmashareNodeInterface {
     
     fun `endpointId`(): kotlin.String
     
-    fun `injectPeer`(`alias`: kotlin.String, `endpointId`: kotlin.String, `addrs`: List<kotlin.String>, `pinRequired`: kotlin.Boolean)
+    fun `injectPeer`(`alias`: kotlin.String, `endpointId`: kotlin.String, `addrs`: List<kotlin.String>, `pinRequired`: kotlin.Boolean, `source`: kotlin.String, `deviceKind`: kotlin.String)
     
     fun `nearbyJson`(): kotlin.String
     
@@ -1587,12 +1587,12 @@ open class OmashareNode: Disposable, AutoCloseable, OmashareNodeInterface
     }
     
 
-    override fun `injectPeer`(`alias`: kotlin.String, `endpointId`: kotlin.String, `addrs`: List<kotlin.String>, `pinRequired`: kotlin.Boolean)
+    override fun `injectPeer`(`alias`: kotlin.String, `endpointId`: kotlin.String, `addrs`: List<kotlin.String>, `pinRequired`: kotlin.Boolean, `source`: kotlin.String, `deviceKind`: kotlin.String)
         = 
     callWithPointer {
     uniffiRustCall() { _status ->
     UniffiLib.INSTANCE.uniffi_omashare_ffi_fn_method_omasharenode_inject_peer(
-        it, FfiConverterString.lower(`alias`),FfiConverterString.lower(`endpointId`),FfiConverterSequenceString.lower(`addrs`),FfiConverterBoolean.lower(`pinRequired`),_status)
+        it, FfiConverterString.lower(`alias`),FfiConverterString.lower(`endpointId`),FfiConverterSequenceString.lower(`addrs`),FfiConverterBoolean.lower(`pinRequired`),FfiConverterString.lower(`source`),FfiConverterString.lower(`deviceKind`),_status)
 }
     }
     
