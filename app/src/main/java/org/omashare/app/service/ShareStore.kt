@@ -36,6 +36,7 @@ object ShareStore {
         val bytesTotal: Long,
         val path: String,
         val inbound: Boolean,
+        val fileNames: List<String> = emptyList(),
     )
 
     data class UiState(
@@ -46,6 +47,8 @@ object ShareStore {
         val incoming: IncomingOffer? = null,
         val transfer: TransferUi? = null,
         val fromShareSheet: Boolean = false,
+        val history: List<HistoryEntry> = emptyList(),
+        val selectedPeerId: String? = null,
     )
 
     private val _state = MutableStateFlow(UiState())
@@ -60,7 +63,14 @@ object ShareStore {
     }
 
     fun setPeers(peers: List<Peer>) {
-        _state.update { it.copy(peers = peers) }
+        _state.update {
+            val selected = it.selectedPeerId
+            val stillValid = selected != null && peers.any { p -> p.endpointId == selected }
+            it.copy(
+                peers = peers,
+                selectedPeerId = if (stillValid) selected else null,
+            )
+        }
     }
 
     fun setStaged(files: List<StagedFile>, fromShareSheet: Boolean? = null) {
@@ -70,6 +80,18 @@ object ShareStore {
                 fromShareSheet = fromShareSheet ?: it.fromShareSheet,
             )
         }
+    }
+
+    fun clearStaged() {
+        _state.update { it.copy(staged = emptyList()) }
+    }
+
+    fun clearAfterOutboundComplete() {
+        _state.update { it.copy(staged = emptyList(), status = "") }
+    }
+
+    fun setSelectedPeer(endpointId: String?) {
+        _state.update { it.copy(selectedPeerId = endpointId) }
     }
 
     fun setShareSheet(on: Boolean) {
@@ -88,5 +110,27 @@ object ShareStore {
         _state.update {
             if (it.incoming?.sessionId == sessionId) it.copy(incoming = null) else it
         }
+    }
+
+    fun addHistory(entry: HistoryEntry) {
+        _state.update {
+            it.copy(history = (listOf(entry) + it.history).take(50))
+        }
+    }
+
+    private var lastSendPaths: List<String> = emptyList()
+    private var lastSendPeerAlias: String? = null
+
+    fun trackOutgoing(paths: List<String>, peerAlias: String?) {
+        lastSendPaths = paths
+        lastSendPeerAlias = peerAlias
+    }
+
+    fun lastOutgoingPaths(): List<String> = lastSendPaths
+    fun lastOutgoingPeerAlias(): String? = lastSendPeerAlias
+
+    fun clearOutgoingTracking() {
+        lastSendPaths = emptyList()
+        lastSendPeerAlias = null
     }
 }

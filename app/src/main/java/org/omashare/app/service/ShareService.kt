@@ -9,6 +9,7 @@ import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
@@ -37,6 +38,9 @@ class ShareService : Service(), EventSink {
     private val pendingSend = ArrayDeque<String>()
     private var sendPeer: String? = null
     private val outgoing = mutableSetOf<String>()
+    private val outgoingPaths = mutableMapOf<String, List<String>>()
+    private val incomingFiles = mutableMapOf<String, List<ShareStore.OfferedFile>>()
+    private val incomingFrom = mutableMapOf<String, String>()
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -171,6 +175,8 @@ class ShareService : Service(), EventSink {
         }
         pendingSend.clear()
         sendPeer = peerId
+        val peerAlias = ShareStore.state.value.peers.find { it.endpointId == peerId }?.alias
+        ShareStore.trackOutgoing(paths, peerAlias)
         val rest = trySendBatch(n, peerId, paths)
         pendingSend.addAll(rest)
     }
@@ -180,14 +186,29 @@ class ShareService : Service(), EventSink {
         return try {
             val sid = n.sendFiles(peerId, paths, null)
             outgoing.add(sid)
+            outgoingPaths[sid] = paths
             ShareStore.setStatus("Offer sent")
             emptyList()
         } catch (e: Exception) {
             val msg = e.message.orEmpty()
             ShareStore.setTransfer(null)
-            ShareStore.setStatus(
-                if (msg.contains("cancelled", ignoreCase = true)) "Cancelled" else "Send failed: ${e.message}",
-            )
+            if (msg.contains("cancelled", ignoreCase = true)) {
+                ShareStore.setStatus("Cancelled")
+            } else {
+                ShareStore.setStatus("Send failed: ${e.message}")
+                paths.forEach { path ->
+                    ShareStore.addHistory(
+                        historyEntry(
+                            id = "${System.currentTimeMillis()}-${path.hashCode()}",
+                            fileName = java.io.File(path).name,
+                            direction = HistoryEntry.Direction.Sent,
+                            status = HistoryEntry.Status.Failed,
+                            openPath = path,
+                            peerAlias = ShareStore.lastOutgoingPeerAlias(),
+                        ),
+                    )
+                }
+            }
             emptyList()
         }
     }
@@ -251,6 +272,8 @@ class ShareService : Service(), EventSink {
                 val session = obj.optString("session_id")
                 val from = obj.optString("from_alias")
                 val files = parseFiles(obj)
+                incomingFiles[session] = files
+                incomingFrom[session] = from
                 ShareStore.setIncoming(ShareStore.IncomingOffer(session, from, files))
                 notifyOffer(session, from, files)
             }
@@ -262,6 +285,7 @@ class ShareService : Service(), EventSink {
             "transfer_progress" -> {
                 val session = obj.optString("session_id")
                 val inbound = session !in outgoing
+                val fileNames = transferFileNames(session, inbound)
                 ShareStore.setTransfer(
                     ShareStore.TransferUi(
                         sessionId = session,
@@ -269,16 +293,19 @@ class ShareService : Service(), EventSink {
                         bytesTotal = obj.optLong("bytes_total"),
                         path = obj.optString("path"),
                         inbound = inbound,
+                        fileNames = fileNames,
                     ),
                 )
             }
             "offer_accepted" -> {
                 val session = obj.optString("session_id")
                 if (session.isNotEmpty()) {
+                    val inbound = session !in outgoing
+                    val fileNames = transferFileNames(session, inbound)
                     val cur = ShareStore.state.value.transfer
                     if (cur == null || cur.sessionId != session || cur.bytesTotal == 0L) {
                         ShareStore.setTransfer(
-                            ShareStore.TransferUi(session, 0, 0, "", session !in outgoing),
+                            ShareStore.TransferUi(session, 0, 0, "", inbound, fileNames),
                         )
                     }
                     ShareStore.setStatus("Accepted — transferring")
@@ -288,10 +315,16 @@ class ShareService : Service(), EventSink {
                 val session = obj.optString("session_id")
                 val savedRaw = obj.optString("saved_to")
                 val inbound = savedRaw.isNotEmpty() && savedRaw != "null"
+                val fromAlias = incomingFrom[session]
+                    ?: ShareStore.state.value.incoming
+                        ?.takeIf { it.sessionId == session }
+                        ?.fromAlias
+                val sentPaths = outgoingPaths[session]
                 ShareStore.clearIncomingIf(session)
                 cancelOfferNotification(session)
                 val more = synchronized(pendingSend) {
                     outgoing.remove(session)
+                    outgoingPaths.remove(session)
                     if (pendingSend.isEmpty()) emptyList() else {
                         val next = pendingSend.removeFirst()
                         listOf(next) + pendingSend.toList().also { pendingSend.clear() }
@@ -299,20 +332,61 @@ class ShareService : Service(), EventSink {
                 }
                 ShareStore.setTransfer(null)
                 if (inbound) {
-                    ShareStore.setStatus("Saving…")
+                    val fileName = java.io.File(savedRaw).name
                     io.execute {
-                        val public = copyToDownloads(savedRaw)
-                        val saved = public ?: savedRaw
-                        obj.put("saved_to", saved)
+                        val result = copyToDownloads(savedRaw)
+                        val saved = result?.displayName ?: fileName
                         notifyResult("Saved to Downloads/Omashare", saved)
                         toast("Saved $saved")
-                        ShareStore.setStatus("Saved $saved")
+                        ShareStore.addHistory(
+                            historyEntry(
+                                id = session,
+                                fileName = saved,
+                                direction = HistoryEntry.Direction.Received,
+                                status = HistoryEntry.Status.Completed,
+                                openUri = result?.uri,
+                                openPath = result?.path,
+                                peerAlias = fromAlias,
+                            ),
+                        )
+                        ShareStore.setStatus("")
                     }
                 } else {
+                    val paths = sentPaths ?: ShareStore.lastOutgoingPaths()
+                    val peerAlias = ShareStore.lastOutgoingPeerAlias()
                     notifyResult("Sent", "File should appear on the other device")
                     toast("Sent")
-                    ShareStore.setStatus("Sent")
+                    if (paths.isEmpty()) {
+                        ShareStore.addHistory(
+                            historyEntry(
+                                id = session,
+                                fileName = "file",
+                                direction = HistoryEntry.Direction.Sent,
+                                status = HistoryEntry.Status.Completed,
+                                peerAlias = peerAlias,
+                            ),
+                        )
+                    } else {
+                        paths.forEach { path ->
+                            ShareStore.addHistory(
+                                historyEntry(
+                                    id = "$session-${path.hashCode()}",
+                                    fileName = java.io.File(path).name,
+                                    direction = HistoryEntry.Direction.Sent,
+                                    status = HistoryEntry.Status.Completed,
+                                    openPath = path,
+                                    peerAlias = peerAlias,
+                                ),
+                            )
+                        }
+                    }
+                    ShareStore.clearOutgoingTracking()
+                    if (more.isEmpty()) {
+                        ShareStore.clearAfterOutboundComplete()
+                    }
                 }
+                incomingFiles.remove(session)
+                incomingFrom.remove(session)
                 if (more.isNotEmpty()) {
                     val peer = sendPeer
                     if (peer != null) io.execute { startSend(peer, more) }
@@ -324,16 +398,44 @@ class ShareService : Service(), EventSink {
                 pendingSend.clear()
                 sendPeer = null
                 outgoing.remove(session)
+                val outboundPaths = outgoingPaths.remove(session) ?: emptyList()
+                val inboundOffer = incomingFiles.remove(session)
+                val fromAlias = incomingFrom.remove(session)
                 ShareStore.setTransfer(null)
                 ShareStore.clearIncomingIf(session)
                 cancelOfferNotification(session)
                 val cancelled = err.contains("cancelled", ignoreCase = true)
-                val text = if (cancelled) "Cancelled" else "Failed: $err"
-                ShareStore.setStatus(text)
                 if (!cancelled) {
+                    val peerAlias = ShareStore.lastOutgoingPeerAlias() ?: fromAlias
+                    val files = when {
+                        outboundPaths.isNotEmpty() -> outboundPaths.map { java.io.File(it).name }
+                        inboundOffer != null -> inboundOffer.map { it.name }
+                        else -> listOf("file")
+                    }
+                    files.forEach { name ->
+                        val path = outboundPaths.find { java.io.File(it).name == name }
+                        ShareStore.addHistory(
+                            historyEntry(
+                                id = "$session-${name.hashCode()}",
+                                fileName = name,
+                                direction = if (outboundPaths.isNotEmpty()) {
+                                    HistoryEntry.Direction.Sent
+                                } else {
+                                    HistoryEntry.Direction.Received
+                                },
+                                status = HistoryEntry.Status.Failed,
+                                openPath = path,
+                                peerAlias = peerAlias,
+                            ),
+                        )
+                    }
                     notifyResult("Transfer failed", err)
-                    toast(text)
+                    toast("Failed: $err")
+                    ShareStore.setStatus("")
+                } else {
+                    ShareStore.setStatus("Cancelled")
                 }
+                ShareStore.clearOutgoingTracking()
             }
             "path_changed" -> {
                 val path = obj.optString("path")
@@ -525,7 +627,42 @@ class ShareService : Service(), EventSink {
         }
     }
 
-    private fun copyToDownloads(path: String): String? {
+    private fun transferFileNames(session: String, inbound: Boolean): List<String> {
+        if (inbound) {
+            return incomingFiles[session]?.map { it.name }
+                ?: ShareStore.state.value.incoming?.files?.map { it.name }
+                ?: emptyList()
+        }
+        return outgoingPaths[session]?.map { java.io.File(it).name }
+            ?: ShareStore.state.value.staged.map { it.name }
+    }
+
+    private fun historyEntry(
+        id: String,
+        fileName: String,
+        direction: HistoryEntry.Direction,
+        status: HistoryEntry.Status,
+        openUri: Uri? = null,
+        openPath: String? = null,
+        peerAlias: String? = null,
+    ): HistoryEntry = HistoryEntry(
+        id = id,
+        fileName = fileName,
+        direction = direction,
+        status = status,
+        timestamp = System.currentTimeMillis(),
+        openUri = openUri,
+        openPath = openPath,
+        peerAlias = peerAlias,
+    )
+
+    private data class DownloadResult(
+        val displayName: String,
+        val uri: Uri?,
+        val path: String?,
+    )
+
+    private fun copyToDownloads(path: String): DownloadResult? {
         val src = java.io.File(path)
         if (!src.isFile) return null
         return try {
@@ -546,7 +683,7 @@ class ShareService : Service(), EventSink {
                 values.clear()
                 values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
                 contentResolver.update(uri, values, null, null)
-                src.name
+                DownloadResult(displayName = src.name, uri = uri, path = null)
             } else {
                 val dir = android.os.Environment.getExternalStoragePublicDirectory(
                     android.os.Environment.DIRECTORY_DOWNLOADS,
@@ -554,7 +691,7 @@ class ShareService : Service(), EventSink {
                 dir.mkdirs()
                 val dest = dir.resolve(src.name)
                 src.copyTo(dest, overwrite = true)
-                dest.absolutePath
+                DownloadResult(displayName = dest.name, uri = null, path = dest.absolutePath)
             }
         } catch (_: Exception) {
             null

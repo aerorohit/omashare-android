@@ -10,12 +10,15 @@ import android.os.Handler
 import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.view.WindowCompat
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import org.omashare.app.service.ShareService
 import org.omashare.app.service.ShareStore
+import org.omashare.app.share.FileOpener
 import org.omashare.app.share.FileStager
 import java.util.concurrent.Executors
 
@@ -43,13 +46,20 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        WindowCompat.getInsetsController(window, window.decorView).apply {
+            isAppearanceLightStatusBars = false
+            isAppearanceLightNavigationBars = false
+        }
         setContent {
             val state by ShareStore.state.collectAsState()
             OmashareTheme {
                 MainScreen(
                     state = state,
-                    onSendFiles = { pickFiles.launch(arrayOf("*/*")) },
-                    onPeer = { peer -> sendTo(peer) },
+                    onSelectFiles = { pickFiles.launch(arrayOf("*/*")) },
+                    onClearSelection = { ShareStore.clearStaged() },
+                    onPeerSelected = { peer -> ShareStore.setSelectedPeer(peer.endpointId) },
+                    onSend = { sendToSelected() },
                     onStopSharing = { ShareService.stop(this) },
                     onStartSharing = { startSharing() },
                     onAccept = { sid ->
@@ -63,6 +73,7 @@ class MainActivity : ComponentActivity() {
                     onCancel = {
                         ShareService.cancel(this, ShareStore.state.value.transfer?.sessionId)
                     },
+                    onOpenHistoryEntry = { entry -> FileOpener.open(this, entry) },
                 )
             }
         }
@@ -90,17 +101,23 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    private fun sendTo(peer: ShareStore.Peer) {
-        val staged = ShareStore.state.value.staged
+    private fun sendToSelected() {
+        val state = ShareStore.state.value
+        val peer = state.peers.find { it.endpointId == state.selectedPeerId }
+        if (peer == null) {
+            ShareStore.setStatus("Select a device first")
+            return
+        }
+        val staged = state.staged
         if (staged.isEmpty()) {
-            ShareStore.setStatus("Choose files first")
+            ShareStore.setStatus("Select files first")
             return
         }
         if (peer.addrs.isEmpty()) {
             ShareStore.setStatus("${peer.alias} has no network address yet — wait a moment")
             return
         }
-        if (ShareStore.state.value.transfer != null) {
+        if (state.transfer != null) {
             ShareStore.setStatus("Already transferring")
             return
         }

@@ -50,7 +50,7 @@ object FileStager {
         ShareStore.setStaged(out)
         if (out.isNotEmpty()) {
             val label = out.joinToString(", ") { "${it.name} (${humanBytes(it.size)})" }
-            ShareStore.setStatus("Tap a device to send $label")
+            ShareStore.setStatus("Select a device, then tap Send")
         }
         return out
     }

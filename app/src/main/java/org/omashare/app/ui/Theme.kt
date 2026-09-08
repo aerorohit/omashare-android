@@ -11,6 +11,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.dp
+
 val MochaBackground = Color(0xFF1E1E2E)
 val MochaSurface = Color(0xFF313244)
 val MochaOverlay = Color(0xFF45475A)
@@ -20,6 +23,8 @@ val MochaAccent = Color(0xFF89B4FA)
 val MochaGreen = Color(0xFFA6E3A1)
 val MochaRed = Color(0xFFF38BA8)
 val MochaYellow = Color(0xFFF9E2AF)
+
+val OmashareCardShape = RoundedCornerShape(8.dp)
 
 private val OmashareColors: ColorScheme = darkColorScheme(
     primary = MochaAccent,
