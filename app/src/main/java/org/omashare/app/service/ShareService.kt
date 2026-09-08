@@ -1,0 +1,667 @@
+package org.omashare.app.service
+
+import android.app.Notification
+import android.app.NotificationManager
+import android.app.PendingIntent
+import android.app.Service
+import android.content.Intent
+import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.wifi.WifiManager
+import android.os.Build
+import android.os.IBinder
+import android.util.Log
+import android.widget.Toast
+import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
+import org.json.JSONArray
+import org.json.JSONObject
+import org.omashare.app.OmashareApp
+import org.omashare.app.ui.MainActivity
+import uniffi.omashare.EventSink
+import uniffi.omashare.OmashareNode
+import java.util.ArrayDeque
+import java.util.concurrent.Executors
+
+class ShareService : Service(), EventSink {
+    private var node: OmashareNode? = null
+    private var nsd: NsdDiscovery? = null
+    private var cmCallback: ConnectivityManager.NetworkCallback? = null
+    @Volatile private var starting = false
+    private var multicastLock: WifiManager.MulticastLock? = null
+    private var lastWifi = false
+    private var lastLanKick = 0L
+    private val io = Executors.newCachedThreadPool { r -> Thread(r, "omashare-io") }
+    private val pendingSend = ArrayDeque<String>()
+    private var sendPeer: String? = null
+    private val outgoing = mutableSetOf<String>()
+
+    override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (intent?.action == ACTION_STOP) {
+            teardown()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return START_NOT_STICKY
+        }
+        ServiceCompat.startForeground(
+            this,
+            NOTIFY_SHARE,
+            notification("Omashare is sharing"),
+            if (Build.VERSION.SDK_INT >= 29) {
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+            } else {
+                0
+            },
+        )
+        acquireMulticast()
+        if (node == null && !starting) {
+            starting = true
+            io.execute { startNode() }
+        }
+        when (intent?.action) {
+            ACTION_ACCEPT -> {
+                val sid = intent.getStringExtra(EXTRA_SESSION)
+                if (sid != null) {
+                    ShareStore.clearIncomingIf(sid)
+                    cancelOfferNotification(sid)
+                    io.execute {
+                        waitForNode()
+                        runCatching { node?.acceptOffer(sid) }
+                    }
+                }
+            }
+            ACTION_DECLINE -> {
+                val sid = intent.getStringExtra(EXTRA_SESSION)
+                if (sid != null) {
+                    ShareStore.clearIncomingIf(sid)
+                    cancelOfferNotification(sid)
+                    io.execute {
+                        waitForNode()
+                        runCatching { node?.declineOffer(sid) }
+                    }
+                }
+            }
+            ACTION_CANCEL -> {
+                val sid = intent.getStringExtra(EXTRA_SESSION)
+                pendingSend.clear()
+                sendPeer = null
+                io.execute { runCatching { node?.cancelTransfer(sid) } }
+            }
+            ACTION_SEND -> {
+                val peer = intent.getStringExtra(EXTRA_PEER) ?: return START_STICKY
+                val paths = intent.getStringArrayListExtra(EXTRA_PATHS).orEmpty()
+                io.execute { startSend(peer, paths) }
+            }
+        }
+        return START_STICKY
+    }
+
+    private fun acquireMulticast() {
+        val wifi = applicationContext.getSystemService(WifiManager::class.java)
+        if (multicastLock == null) {
+            multicastLock = wifi?.createMulticastLock("omashare")?.apply {
+                setReferenceCounted(false)
+            }
+        }
+        val lock = multicastLock ?: return
+        if (!lock.isHeld) {
+            lock.acquire()
+        }
+    }
+
+    private fun startNode() {
+        try {
+            val n = OmashareNode()
+            val files = getExternalFilesDir(null) ?: filesDir
+            n.start(
+                alias = Build.MODEL,
+                pin = null,
+                receiveDir = files.resolve("inbox").apply { mkdirs() }.absolutePath,
+                dataDir = files.resolve("data").apply { mkdirs() }.absolutePath,
+                deviceKind = "mobile",
+                useRelays = true,
+                listener = this,
+            )
+            node = n
+            instance = this
+            val eid = n.endpointId()
+            nsd = NsdDiscovery(this) { alias, peerEid, host, port ->
+                io.execute { injectFromLan(n, alias, peerEid, host, port) }
+            }.also {
+                it.advertise(Build.MODEL, eid, 53318)
+                it.browse()
+            }
+            lastWifi = true
+            watchNetwork(n)
+            val msg = "Omashare is sharing"
+            startForeground(NOTIFY_SHARE, notification(msg))
+            ShareStore.setSharing(true)
+            ShareStore.setStatus("Listening as ${Build.MODEL}")
+        } catch (e: Exception) {
+            val msg = "Node failed: ${e.message}"
+            startForeground(NOTIFY_SHARE, notification(msg))
+            ShareStore.setSharing(false)
+            ShareStore.setStatus(msg)
+        } finally {
+            starting = false
+        }
+    }
+
+    private fun waitForNode(): OmashareNode? {
+        repeat(50) {
+            node?.let { return it }
+            Thread.sleep(100)
+        }
+        return node
+    }
+
+    private fun startSend(peerId: String, paths: List<String>) {
+        val n = waitForNode()
+        if (n == null) {
+            ShareStore.setStatus("Node not ready — wait a second and tap again")
+            return
+        }
+        if (paths.isEmpty()) {
+            ShareStore.setStatus("Choose files first")
+            return
+        }
+        pendingSend.clear()
+        sendPeer = peerId
+        val rest = trySendBatch(n, peerId, paths)
+        pendingSend.addAll(rest)
+    }
+
+    private fun trySendBatch(n: OmashareNode, peerId: String, paths: List<String>): List<String> {
+        ShareStore.setStatus("Hashing…")
+        return try {
+            val sid = n.sendFiles(peerId, paths, null)
+            outgoing.add(sid)
+            ShareStore.setStatus("Offer sent")
+            emptyList()
+        } catch (e: Exception) {
+            val msg = e.message.orEmpty()
+            ShareStore.setTransfer(null)
+            ShareStore.setStatus(
+                if (msg.contains("cancelled", ignoreCase = true)) "Cancelled" else "Send failed: ${e.message}",
+            )
+            emptyList()
+        }
+    }
+
+    private fun watchNetwork(n: OmashareNode) {
+        val cm = getSystemService(ConnectivityManager::class.java)
+        val cb = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                val caps = cm.getNetworkCapabilities(network) ?: return
+                onCaps(n, caps)
+            }
+            override fun onLost(network: Network) {
+                lastWifi = false
+            }
+            override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+                onCaps(n, caps)
+            }
+        }
+        cmCallback = cb
+        cm.registerDefaultNetworkCallback(cb)
+    }
+
+    private fun onCaps(n: OmashareNode, caps: NetworkCapabilities) {
+        val metered = !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) ||
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+        val wifi = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+        n.setNetworkHint(if (wifi && !metered) "wifi" else if (metered) "metered" else "unknown")
+        if (wifi && !lastWifi) {
+            lastWifi = true
+            io.execute { onWifiUp(n) }
+        } else if (!wifi) {
+            lastWifi = false
+        }
+    }
+
+    private fun onWifiUp(n: OmashareNode) {
+        val now = System.currentTimeMillis()
+        if (now - lastLanKick < 2_000) return
+        lastLanKick = now
+        acquireMulticast()
+        nsd?.restart()
+        runCatching { n.refreshLan() }
+        if (ShareStore.state.value.transfer == null) {
+            ShareStore.setStatus("Looking for devices…")
+        }
+    }
+
+    override fun onEventJson(json: String) {
+        val obj = JSONObject(json)
+        val type = obj.optString("type")
+        if (type == "transfer_progress") {
+            Log.i(
+                TAG,
+                "$type session=${obj.optString("session_id")} ${obj.optLong("bytes_done")}/${obj.optLong("bytes_total")} path=${obj.optString("path")}",
+            )
+        } else {
+            Log.i(TAG, "$type $json")
+        }
+        when (type) {
+            "incoming_offer" -> {
+                val session = obj.optString("session_id")
+                val from = obj.optString("from_alias")
+                val files = parseFiles(obj)
+                ShareStore.setIncoming(ShareStore.IncomingOffer(session, from, files))
+                notifyOffer(session, from, files)
+            }
+            "metered_consent_needed" -> {
+                val session = obj.optString("session_id")
+                io.execute { runCatching { node?.consentMetered(session, true) } }
+            }
+            "nearby_updated" -> applyNearby(obj.optJSONArray("peers") ?: JSONArray())
+            "transfer_progress" -> {
+                val session = obj.optString("session_id")
+                val inbound = session !in outgoing
+                ShareStore.setTransfer(
+                    ShareStore.TransferUi(
+                        sessionId = session,
+                        bytesDone = obj.optLong("bytes_done"),
+                        bytesTotal = obj.optLong("bytes_total"),
+                        path = obj.optString("path"),
+                        inbound = inbound,
+                    ),
+                )
+            }
+            "offer_accepted" -> {
+                val session = obj.optString("session_id")
+                if (session.isNotEmpty()) {
+                    val cur = ShareStore.state.value.transfer
+                    if (cur == null || cur.sessionId != session || cur.bytesTotal == 0L) {
+                        ShareStore.setTransfer(
+                            ShareStore.TransferUi(session, 0, 0, "", session !in outgoing),
+                        )
+                    }
+                    ShareStore.setStatus("Accepted — transferring")
+                }
+            }
+            "transfer_complete" -> {
+                val session = obj.optString("session_id")
+                val savedRaw = obj.optString("saved_to")
+                val inbound = savedRaw.isNotEmpty() && savedRaw != "null"
+                ShareStore.clearIncomingIf(session)
+                cancelOfferNotification(session)
+                val more = synchronized(pendingSend) {
+                    outgoing.remove(session)
+                    if (pendingSend.isEmpty()) emptyList() else {
+                        val next = pendingSend.removeFirst()
+                        listOf(next) + pendingSend.toList().also { pendingSend.clear() }
+                    }
+                }
+                ShareStore.setTransfer(null)
+                if (inbound) {
+                    ShareStore.setStatus("Saving…")
+                    io.execute {
+                        val public = copyToDownloads(savedRaw)
+                        val saved = public ?: savedRaw
+                        obj.put("saved_to", saved)
+                        notifyResult("Saved to Downloads/Omashare", saved)
+                        toast("Saved $saved")
+                        ShareStore.setStatus("Saved $saved")
+                    }
+                } else {
+                    notifyResult("Sent", "File should appear on the other device")
+                    toast("Sent")
+                    ShareStore.setStatus("Sent")
+                }
+                if (more.isNotEmpty()) {
+                    val peer = sendPeer
+                    if (peer != null) io.execute { startSend(peer, more) }
+                }
+            }
+            "transfer_failed" -> {
+                val session = obj.optString("session_id")
+                val err = obj.optString("error")
+                pendingSend.clear()
+                sendPeer = null
+                outgoing.remove(session)
+                ShareStore.setTransfer(null)
+                ShareStore.clearIncomingIf(session)
+                cancelOfferNotification(session)
+                val cancelled = err.contains("cancelled", ignoreCase = true)
+                val text = if (cancelled) "Cancelled" else "Failed: $err"
+                ShareStore.setStatus(text)
+                if (!cancelled) {
+                    notifyResult("Transfer failed", err)
+                    toast(text)
+                }
+            }
+            "path_changed" -> {
+                val path = obj.optString("path")
+                val t = ShareStore.state.value.transfer
+                if (t != null) {
+                    ShareStore.setTransfer(t.copy(path = path))
+                }
+            }
+        }
+        sendBroadcast(Intent(ACTION_EVENT).putExtra("json", obj.toString()).setPackage(packageName))
+    }
+
+    private fun applyNearby(arr: JSONArray) {
+        val byAlias = linkedMapOf<String, ShareStore.Peer>()
+        for (i in 0 until arr.length()) {
+            val p = arr.getJSONObject(i)
+            val addrs = mutableListOf<String>()
+            val aa = p.optJSONArray("addrs")
+            if (aa != null) {
+                for (j in 0 until aa.length()) addrs.add(aa.optString(j))
+            }
+            val peer = ShareStore.Peer(
+                alias = p.optString("alias"),
+                endpointId = p.optString("endpoint_id"),
+                deviceKind = p.optString("device_kind").ifEmpty { "unknown" },
+                addrs = addrs,
+            )
+            val key = peer.alias.lowercase()
+            val prev = byAlias[key]
+            if (prev == null || (prev.addrs.isEmpty() && peer.addrs.isNotEmpty())) {
+                byAlias[key] = peer
+            }
+        }
+        ShareStore.setPeers(byAlias.values.toList())
+    }
+
+    fun refreshPeers() {
+        io.execute {
+            val json = node?.nearbyJson() ?: return@execute
+            applyNearby(JSONArray(json))
+        }
+    }
+
+    private fun injectFromLan(
+        n: OmashareNode,
+        alias: String,
+        fallbackEid: String,
+        host: String,
+        port: Int,
+    ) {
+        val info = fetchOmashareInfo(host, port) ?: return
+        val eid = info.optString("endpoint_id").ifEmpty { fallbackEid }
+        if (eid.isEmpty()) return
+        val name = info.optString("alias").ifEmpty { alias }
+        val addrs = mutableListOf<String>()
+        var irohPort: String? = null
+        val arr = info.optJSONArray("addrs")
+        if (arr != null) {
+            for (i in 0 until arr.length()) {
+                val raw = arr.optString(i)
+                if (raw.startsWith("http://") || raw.startsWith("https://")) {
+                    if (!addrs.contains(raw)) addrs.add(raw)
+                    continue
+                }
+                val idx = raw.lastIndexOf(':')
+                if (idx > 0) irohPort = raw.substring(idx + 1)
+                rewriteDirectAddr(raw, host)?.let { rewritten ->
+                    if (!addrs.contains(rewritten)) addrs.add(rewritten)
+                }
+            }
+        }
+        nsdHostPort(host, irohPort)?.let { lan ->
+            if (!addrs.contains(lan)) addrs.add(0, lan)
+        }
+        if (addrs.isEmpty()) return
+        n.injectPeer(name, eid, addrs, info.optBoolean("pin_required"))
+    }
+
+    private fun nsdHostPort(host: String, irohPort: String?): String? {
+        if (host.isEmpty() || irohPort.isNullOrEmpty()) return null
+        if (host == "127.0.0.1" || host == "::1") return null
+        return if (host.contains(':') && !host.startsWith("[")) {
+            "[$host]:$irohPort"
+        } else {
+            "$host:$irohPort"
+        }
+    }
+
+    private fun fetchOmashareInfo(host: String, port: Int): JSONObject? {
+        repeat(5) { attempt ->
+            try {
+                val url = java.net.URL("http://$host:$port/omashare/info")
+                val conn = url.openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 800
+                conn.readTimeout = 800
+                conn.requestMethod = "GET"
+                return conn.inputStream.bufferedReader().use { JSONObject(it.readText()) }
+            } catch (_: Exception) {
+                if (attempt < 4) Thread.sleep(400)
+            }
+        }
+        return null
+    }
+
+    private fun rewriteDirectAddr(addr: String, host: String): String? {
+        val idx = addr.lastIndexOf(':')
+        if (idx <= 0) return null
+        var ip = addr.substring(0, idx)
+        if (ip.startsWith("[") && ip.endsWith("]")) {
+            ip = ip.substring(1, ip.length - 1)
+        }
+        val p = addr.substring(idx + 1)
+        val useHost = ip == "0.0.0.0" || ip == "::" || ip == "127.0.0.1" || ip == "::1"
+        val outIp = if (useHost) host else ip
+        if (outIp == "127.0.0.1" || outIp == "::1") return null
+        return "$outIp:$p"
+    }
+
+    private fun parseFiles(obj: JSONObject): List<ShareStore.OfferedFile> {
+        val files = obj.optJSONArray("files") ?: return emptyList()
+        val out = mutableListOf<ShareStore.OfferedFile>()
+        for (i in 0 until files.length()) {
+            val f = files.getJSONObject(i)
+            out.add(ShareStore.OfferedFile(f.optString("name", "file"), f.optLong("size")))
+        }
+        return out
+    }
+
+    private fun notifyOffer(session: String, from: String, files: List<ShareStore.OfferedFile>) {
+        val names = files.joinToString(", ") { it.name }.ifEmpty { "a file" }
+        val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        val open = PendingIntent.getActivity(
+            this,
+            session.hashCode(),
+            Intent(this, MainActivity::class.java).apply {
+                this.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                putExtra("incoming_session", session)
+            },
+            piFlags,
+        )
+        val accept = PendingIntent.getBroadcast(
+            this,
+            session.hashCode() + 1,
+            Intent(this, OfferActionReceiver::class.java).apply {
+                action = OfferActionReceiver.ACTION_ACCEPT
+                putExtra(EXTRA_SESSION, session)
+            },
+            piFlags,
+        )
+        val decline = PendingIntent.getBroadcast(
+            this,
+            session.hashCode() + 2,
+            Intent(this, OfferActionReceiver::class.java).apply {
+                action = OfferActionReceiver.ACTION_DECLINE
+                putExtra(EXTRA_SESSION, session)
+            },
+            piFlags,
+        )
+        val n = NotificationCompat.Builder(this, OmashareApp.CHANNEL_OFFERS)
+            .setContentTitle("Receive files?")
+            .setContentText("$from wants to send $names")
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentIntent(open)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .addAction(0, "Accept", accept)
+            .addAction(0, "Decline", decline)
+            .build()
+        getSystemService(NotificationManager::class.java).notify(session.hashCode(), n)
+    }
+
+    private fun cancelOfferNotification(session: String) {
+        getSystemService(NotificationManager::class.java).cancel(session.hashCode())
+    }
+
+    private fun notifyResult(title: String, text: String) {
+        val n = NotificationCompat.Builder(this, OmashareApp.CHANNEL_RESULTS)
+            .setContentTitle(title)
+            .setContentText(text)
+            .setSmallIcon(android.R.drawable.stat_sys_upload_done)
+            .setAutoCancel(true)
+            .build()
+        getSystemService(NotificationManager::class.java).notify(NOTIFY_RESULT, n)
+    }
+
+    private fun toast(text: String) {
+        android.os.Handler(mainLooper).post {
+            Toast.makeText(applicationContext, text, Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun copyToDownloads(path: String): String? {
+        val src = java.io.File(path)
+        if (!src.isFile) return null
+        return try {
+            if (Build.VERSION.SDK_INT >= 29) {
+                val values = android.content.ContentValues().apply {
+                    put(android.provider.MediaStore.Downloads.DISPLAY_NAME, src.name)
+                    put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+                    put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
+                    put(android.provider.MediaStore.Downloads.RELATIVE_PATH, "Download/Omashare")
+                }
+                val uri = contentResolver.insert(
+                    android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                    values,
+                ) ?: return null
+                contentResolver.openOutputStream(uri)?.use { out ->
+                    src.inputStream().use { it.copyTo(out) }
+                }
+                values.clear()
+                values.put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
+                contentResolver.update(uri, values, null, null)
+                src.name
+            } else {
+                val dir = android.os.Environment.getExternalStoragePublicDirectory(
+                    android.os.Environment.DIRECTORY_DOWNLOADS,
+                ).resolve("Omashare")
+                dir.mkdirs()
+                val dest = dir.resolve(src.name)
+                src.copyTo(dest, overwrite = true)
+                dest.absolutePath
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    override fun onDestroy() {
+        teardown()
+        io.shutdownNow()
+        super.onDestroy()
+    }
+
+    private fun teardown() {
+        nsd?.stop()
+        nsd = null
+        cmCallback?.let { runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(it) } }
+        cmCallback = null
+        multicastLock?.release()
+        multicastLock = null
+        runCatching { node?.destroy() }
+        node = null
+        instance = null
+        ShareStore.setSharing(false)
+        ShareStore.setStatus("Sharing stopped")
+    }
+
+    private fun notification(text: String): Notification {
+        val pi = PendingIntent.getActivity(
+            this,
+            0,
+            Intent(this, MainActivity::class.java),
+            PendingIntent.FLAG_IMMUTABLE,
+        )
+        return NotificationCompat.Builder(this, OmashareApp.CHANNEL_TRANSFER)
+            .setContentTitle("Omashare")
+            .setContentText(text)
+            .setSmallIcon(android.R.drawable.stat_sys_upload)
+            .setContentIntent(pi)
+            .setOngoing(true)
+            .setSilent(true)
+            .build()
+    }
+
+    companion object {
+        const val ACTION_EVENT = "org.omashare.app.EVENT"
+        const val ACTION_ACCEPT = "org.omashare.app.service.ACCEPT"
+        const val ACTION_DECLINE = "org.omashare.app.service.DECLINE"
+        const val ACTION_CANCEL = "org.omashare.app.service.CANCEL"
+        const val ACTION_SEND = "org.omashare.app.service.SEND"
+        const val ACTION_STOP = "org.omashare.app.service.STOP"
+        const val EXTRA_SESSION = "session"
+        const val EXTRA_PEER = "peer"
+        const val EXTRA_PATHS = "paths"
+        private const val NOTIFY_SHARE = 1
+        private const val NOTIFY_RESULT = 2
+        private const val TAG = "omashare"
+
+        var instance: ShareService? = null
+            private set
+
+        fun node(): OmashareNode? = instance?.node
+
+        fun start(context: android.content.Context) {
+            androidx.core.content.ContextCompat.startForegroundService(
+                context,
+                Intent(context, ShareService::class.java),
+            )
+        }
+
+        fun stop(context: android.content.Context) {
+            context.startService(Intent(context, ShareService::class.java).setAction(ACTION_STOP))
+        }
+
+        fun send(context: android.content.Context, peerId: String, paths: List<String>) {
+            val i = Intent(context, ShareService::class.java).apply {
+                action = ACTION_SEND
+                putExtra(EXTRA_PEER, peerId)
+                putStringArrayListExtra(EXTRA_PATHS, ArrayList(paths))
+            }
+            androidx.core.content.ContextCompat.startForegroundService(context, i)
+        }
+
+        fun accept(context: android.content.Context, session: String) {
+            androidx.core.content.ContextCompat.startForegroundService(
+                context,
+                Intent(context, ShareService::class.java)
+                    .setAction(ACTION_ACCEPT)
+                    .putExtra(EXTRA_SESSION, session),
+            )
+        }
+
+        fun decline(context: android.content.Context, session: String) {
+            androidx.core.content.ContextCompat.startForegroundService(
+                context,
+                Intent(context, ShareService::class.java)
+                    .setAction(ACTION_DECLINE)
+                    .putExtra(EXTRA_SESSION, session),
+            )
+        }
+
+        fun cancel(context: android.content.Context, session: String?) {
+            androidx.core.content.ContextCompat.startForegroundService(
+                context,
+                Intent(context, ShareService::class.java)
+                    .setAction(ACTION_CANCEL)
+                    .putExtra(EXTRA_SESSION, session),
+            )
+        }
+    }
+}
