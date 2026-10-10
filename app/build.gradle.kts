@@ -23,9 +23,24 @@ android {
             useLegacyPackaging = true
         }
     }
+    signingConfigs {
+        create("release") {
+            val store = System.getenv("OMASHARE_KEYSTORE")
+            if (!store.isNullOrBlank()) {
+                storeFile = file(store)
+                storePassword = System.getenv("OMASHARE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("OMASHARE_KEY_ALIAS")
+                keyPassword = System.getenv("OMASHARE_KEY_PASSWORD")
+            }
+        }
+    }
     buildTypes {
         release {
             isMinifyEnabled = false
+            val store = System.getenv("OMASHARE_KEYSTORE")
+            if (!store.isNullOrBlank()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
     compileOptions {

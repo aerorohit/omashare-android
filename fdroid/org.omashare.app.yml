@@ -1,0 +1,54 @@
+# Draft for a fdroiddata merge request. It is not live until that request is merged.
+# Before submitting, replace the srclib commit with the omashare revision this tag was
+# built against, and set AllowedAPKSigningKeys from ./scripts/signing-cert.sh if the
+# GitHub APK and the F-Droid APK should be the same binary.
+Categories:
+  - Connectivity
+License: MIT
+AuthorName: aerorohit
+SourceCode: https://github.com/aerorohit/omashare-android
+IssueTracker: https://github.com/aerorohit/omashare-android/issues
+Changelog: https://github.com/aerorohit/omashare-android/releases
+
+Name: Omashare
+AutoName: Omashare
+Summary: Send files to a nearby Linux computer or Android phone
+Description: |-
+    Omashare sends files between your devices. A Linux computer and an
+    Android phone, or two phones. There is no account. The other person
+    accepts before a file is saved.
+
+    Turn sharing on while you are exchanging files, then turn it off.
+    Nearby devices appear from the local network or from Bluetooth.
+    Bluetooth is only used to discover a device. The file is transferred
+    over the network.
+
+    Share from another app by choosing Omashare in the share sheet.
+    Accepted files are saved in Downloads/Omashare.
+
+RepoType: git
+Repo: https://github.com/aerorohit/omashare-android.git
+
+Builds:
+  - versionName: 0.1.0
+    versionCode: 1
+    commit: v0.1.0
+    subdir: app
+    sudo:
+      - apt-get update
+      - apt-get install -y --no-install-recommends curl build-essential pkg-config
+    gradle:
+      - yes
+    srclibs:
+      - Omashare::https://github.com/aerorohit/omashare.git::main
+    prebuild:
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
+      - bash -lc 'source "$$HOME/.cargo/env" && cargo install cargo-ndk --locked && NDK=$$(echo "$$ANDROID_HOME"/ndk/*) && ANDROID_NDK_HOME="$$NDK" OMASHARE_ROOT="$$Omashare$$" ./build-native.sh'
+    ndk: r27c
+    scanignore:
+      - app/src/main/jniLibs
+
+AutoUpdateMode: Version
+UpdateCheckMode: Tags
+CurrentVersion: 0.1.0
+CurrentVersionCode: 1

@@ -9,4 +9,6 @@ captures/
 *.apk
 *.ap_
 *.aab
+*.keystore
+dist/out/
 .DS_Store

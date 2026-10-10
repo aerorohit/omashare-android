@@ -1,0 +1,5 @@
+Omashare sends files between your devices. A Linux computer and an Android phone, or two phones. There is no account. The other person accepts before a file is saved.
+
+Turn sharing on while you are exchanging files, then turn it off. Nearby devices appear from the local network or from Bluetooth. Bluetooth is only used to discover a device. The file is transferred over the network.
+
+Share from another app by choosing Omashare in the share sheet. Accepted files are saved in Downloads/Omashare.

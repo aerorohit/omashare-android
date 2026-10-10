@@ -1,0 +1,1 @@
+First public release. Send and receive files with a nearby Omashare device, from the app or the share sheet.
