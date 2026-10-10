@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="logo.svg" width="128" alt="Omashare">
+</p>
+
 # Omashare
 
 Omashare sends files between your devices. A Linux computer and an Android phone, or two phones. There is no account. The other person accepts before a file is saved.
