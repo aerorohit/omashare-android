@@ -98,7 +98,12 @@ class ShareService : Service(), EventSink {
                 val sid = intent.getStringExtra(EXTRA_SESSION)
                 pendingSend.clear()
                 sendPeer = null
-                io.execute { runCatching { node?.cancelTransfer(sid) } }
+                ShareStore.setStatus("Cancelling…")
+                io.execute {
+                    val n = waitForNode()
+                    runCatching { n?.cancelTransfer(sid) }
+                        .onFailure { ShareStore.setStatus("Cancel failed: ${it.message}") }
+                }
             }
             ACTION_SEND -> {
                 val peer = intent.getStringExtra(EXTRA_PEER) ?: return START_STICKY
@@ -200,7 +205,11 @@ class ShareService : Service(), EventSink {
             val sid = n.sendFiles(peerId, paths, null)
             outgoing.add(sid)
             outgoingPaths[sid] = paths
-            ShareStore.setStatus("Offer sent")
+            val names = paths.map { java.io.File(it).name }
+            ShareStore.setTransfer(
+                ShareStore.TransferUi(sid, 0, 0, "", inbound = false, fileNames = names),
+            )
+            ShareStore.setStatus("Hashing…")
             emptyList()
         } catch (e: Exception) {
             val msg = e.message.orEmpty()
@@ -234,7 +243,10 @@ class ShareService : Service(), EventSink {
                 onCaps(n, caps)
             }
             override fun onLost(network: Network) {
-                lastWifi = false
+                if (!wifiStillUp()) {
+                    lastWifi = false
+                    io.execute { onWifiDown(n) }
+                }
             }
             override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
                 onCaps(n, caps)
@@ -248,12 +260,19 @@ class ShareService : Service(), EventSink {
         val metered = !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) ||
             caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
         val wifi = caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
-        n.setNetworkHint(if (wifi && !metered) "wifi" else if (metered) "metered" else "unknown")
+        n.setNetworkHint(
+            when {
+                wifi -> "wifi"
+                metered -> "metered"
+                else -> "unknown"
+            },
+        )
         if (wifi && !lastWifi) {
             lastWifi = true
             io.execute { onWifiUp(n) }
-        } else if (!wifi) {
+        } else if (!wifi && lastWifi) {
             lastWifi = false
+            io.execute { onWifiDown(n) }
         }
     }
 
@@ -267,6 +286,19 @@ class ShareService : Service(), EventSink {
         if (ShareStore.state.value.transfer == null) {
             ShareStore.setStatus("Looking for devices…")
         }
+    }
+
+    private fun wifiStillUp(): Boolean {
+        val cm = getSystemService(ConnectivityManager::class.java) ?: return false
+        val net = cm.activeNetwork ?: return false
+        val caps = cm.getNetworkCapabilities(net) ?: return false
+        return caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+    }
+
+    private fun onWifiDown(n: OmashareNode) {
+        nsd?.stop()
+        n.setNetworkHint("unknown")
+        refreshPeers()
     }
 
     override fun onEventJson(json: String) {
@@ -479,7 +511,12 @@ class ShareService : Service(), EventSink {
             )
             val key = peer.alias.lowercase()
             val prev = byAlias[key]
-            if (prev == null || (prev.addrs.isEmpty() && peer.addrs.isNotEmpty())) {
+            // Same rules as core discovery: keep one row per alias, prefer LAN over BLE.
+            if (prev == null ||
+                prev.endpointId == peer.endpointId ||
+                (prev.addrs.isEmpty() && peer.addrs.isNotEmpty()) ||
+                (peer.source != "bluetooth" && prev.source == "bluetooth")
+            ) {
                 byAlias[key] = peer
             }
         }

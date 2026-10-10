@@ -88,7 +88,11 @@ class MainActivity : ComponentActivity() {
                             ShareService.decline(this, sid)
                         },
                         onCancel = {
-                            ShareService.cancel(this, ShareStore.state.value.transfer?.sessionId)
+                            val st = ShareStore.state.value
+                            ShareService.cancel(
+                                this,
+                                st.transfer?.sessionId ?: st.incoming?.sessionId,
+                            )
                         },
                         onOpenHistoryEntry = { entry -> FileOpener.open(this, entry) },
                         onOpenSettings = { showSettings = true },
