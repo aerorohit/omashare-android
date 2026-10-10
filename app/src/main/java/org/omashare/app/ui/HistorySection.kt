@@ -3,19 +3,15 @@ package org.omashare.app.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,21 +42,21 @@ fun SelectionCard(
         modifier = Modifier
             .fillMaxWidth()
             .background(MochaSurface, OmashareCardShape)
-            .padding(12.dp),
+            .padding(16.dp),
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
+            SectionLabel(
                 text = "Selection",
-                color = MochaMuted,
-                fontSize = 13.sp,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = onClear) {
-                Text("Clear", color = MochaRed, fontSize = 13.sp)
-            }
+            QuietAction(
+                text = "Clear",
+                color = MochaRed,
+                onClick = onClear,
+            )
         }
         Text(
             text = "Files: ${staged.size}  ·  ${FileStager.humanBytes(totalSize)}",
@@ -151,17 +147,12 @@ fun HistorySection(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
+        Spacer(modifier = Modifier.height(16.dp))
+        SectionLabel("History")
         Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "History",
-            color = MochaMuted,
-            fontSize = 13.sp,
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        Box(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(132.dp)
                 .background(MochaSurface, OmashareCardShape),
         ) {
             if (history.isEmpty()) {
@@ -169,17 +160,12 @@ fun HistorySection(
                     text = "No transfers yet",
                     color = MochaMuted,
                     fontSize = 13.sp,
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .padding(16.dp),
+                    modifier = Modifier.padding(16.dp),
                 )
             } else {
-                LazyColumn(
-                    modifier = Modifier.padding(vertical = 4.dp),
-                ) {
-                    items(history, key = { it.id }) { entry ->
-                        HistoryRow(entry = entry, onClick = { onOpenEntry(entry) })
-                    }
+                history.forEachIndexed { index, entry ->
+                    if (index > 0) Hairline()
+                    HistoryRow(entry = entry, onClick = { onOpenEntry(entry) })
                 }
             }
         }
@@ -205,14 +191,14 @@ private fun HistoryRow(entry: HistoryEntry, onClick: () -> Unit) {
             .then(
                 if (canOpen) Modifier.clickable(onClick = onClick) else Modifier,
             )
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = icon,
             color = iconColor,
             fontSize = 16.sp,
-            modifier = Modifier.padding(end = 10.dp),
+            modifier = Modifier.padding(end = 8.dp),
         )
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -230,7 +216,7 @@ private fun HistoryRow(entry: HistoryEntry, onClick: () -> Unit) {
                 Text(
                     text = label,
                     color = MochaMuted,
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -239,7 +225,8 @@ private fun HistoryRow(entry: HistoryEntry, onClick: () -> Unit) {
         Text(
             text = relativeTime(entry.timestamp),
             color = MochaMuted,
-            fontSize = 12.sp,
+            fontSize = 13.sp,
+            maxLines = 1,
         )
     }
 }

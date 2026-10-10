@@ -12,4 +12,18 @@
     <string name="decline">Decline</string>
     <string name="cancel">Cancel</string>
     <string name="receive_file">Receive files?</string>
+    <string name="qs_tile_label">Omashare</string>
+    <string name="qs_tile_subtitle_on">Discovering</string>
+    <string name="qs_tile_subtitle_off">Off</string>
+    <string name="qs_tile_content_description">Omashare, %1$s</string>
+    <string name="qs_tile_start_failed">Could not start sharing</string>
+    <string name="qs_tile_stop_failed">Could not stop sharing</string>
+    <string name="settings_quick_settings">Quick settings</string>
+    <string name="settings_add_qs_tile">Add quick settings tile</string>
+    <string name="settings_qs_tile_summary">Turns discovery on and off from the notification shade.</string>
+    <string name="settings_qs_tile_manual">Add the Omashare tile from the quick settings editor. Long-press the panel, then edit tiles.</string>
+    <string name="qs_tile_added">Quick settings tile added</string>
+    <string name="qs_tile_already_added">Omashare is already in quick settings</string>
+    <string name="qs_tile_not_added">Tile was not added</string>
+    <string name="qs_tile_add_failed">Could not add the quick settings tile</string>
 </resources>

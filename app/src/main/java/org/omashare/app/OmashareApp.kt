@@ -1,6 +1,7 @@
 package org.omashare.app
 
 import android.app.Application
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
@@ -23,7 +24,9 @@ class OmashareApp : Application() {
                     CHANNEL_OFFERS,
                     "Incoming files",
                     NotificationManager.IMPORTANCE_HIGH,
-                ),
+                ).apply {
+                    lockscreenVisibility = Notification.VISIBILITY_PUBLIC
+                },
             )
             nm.createNotificationChannel(
                 NotificationChannel(

@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.net.ConnectivityManager
@@ -12,7 +13,10 @@ import android.net.NetworkCapabilities
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
+import android.service.quicksettings.TileService
 import android.util.Log
 import android.widget.Toast
 import androidx.core.app.NotificationCompat
@@ -20,6 +24,7 @@ import androidx.core.app.ServiceCompat
 import org.json.JSONArray
 import org.json.JSONObject
 import org.omashare.app.OmashareApp
+import org.omashare.app.ui.IncomingOfferActivity
 import org.omashare.app.ui.MainActivity
 import uniffi.omashare.EventSink
 import uniffi.omashare.OmashareNode
@@ -47,25 +52,17 @@ class ShareService : Service(), EventSink {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == ACTION_STOP) {
-            teardown()
-            stopForeground(STOP_FOREGROUND_REMOVE)
-            stopSelf()
+            // startForegroundService() requires this even when the next step is to stop.
+            promoteForeground()
+            try {
+                teardown()
+            } finally {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+            }
             return START_NOT_STICKY
         }
-        ServiceCompat.startForeground(
-            this,
-            NOTIFY_SHARE,
-            notification("Omashare is sharing"),
-            if (Build.VERSION.SDK_INT >= 29) {
-                var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-                if (Build.VERSION.SDK_INT >= 34) {
-                    types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-                }
-                types
-            } else {
-                0
-            },
-        )
+        promoteForeground()
         acquireMulticast()
         if (node == null && !starting) {
             starting = true
@@ -112,6 +109,23 @@ class ShareService : Service(), EventSink {
             }
         }
         return START_STICKY
+    }
+
+    private fun promoteForeground() {
+        ServiceCompat.startForeground(
+            this,
+            NOTIFY_SHARE,
+            notification("Omashare is sharing"),
+            if (Build.VERSION.SDK_INT >= 29) {
+                var types = ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                if (Build.VERSION.SDK_INT >= 34) {
+                    types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                }
+                types
+            } else {
+                0
+            },
+        )
     }
 
     private fun acquireMulticast() {
@@ -161,12 +175,12 @@ class ShareService : Service(), EventSink {
             watchNetwork(n)
             val msg = "Omashare is sharing"
             startForeground(NOTIFY_SHARE, notification(msg))
-            ShareStore.setSharing(true)
+            publishSharing(true)
             ShareStore.setStatus("Listening as ${Build.MODEL}")
         } catch (e: Exception) {
             val msg = "Node failed: ${e.message}"
             startForeground(NOTIFY_SHARE, notification(msg))
-            ShareStore.setSharing(false)
+            publishSharing(false)
             ShareStore.setStatus(msg)
         } finally {
             starting = false
@@ -642,15 +656,16 @@ class ShareService : Service(), EventSink {
     private fun notifyOffer(session: String, from: String, files: List<ShareStore.OfferedFile>) {
         val names = files.joinToString(", ") { it.name }.ifEmpty { "a file" }
         val piFlags = PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        val open = PendingIntent.getActivity(
-            this,
-            session.hashCode(),
+        val inForeground = ShareStore.isUiForeground()
+        val openIntent = if (inForeground) {
             Intent(this, MainActivity::class.java).apply {
-                this.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
                 putExtra("incoming_session", session)
-            },
-            piFlags,
-        )
+            }
+        } else {
+            offerPopupIntent(session, from, files)
+        }
+        val open = PendingIntent.getActivity(this, session.hashCode(), openIntent, piFlags)
         val accept = PendingIntent.getBroadcast(
             this,
             session.hashCode() + 1,
@@ -669,17 +684,56 @@ class ShareService : Service(), EventSink {
             },
             piFlags,
         )
-        val n = NotificationCompat.Builder(this, OmashareApp.CHANNEL_OFFERS)
+        val builder = NotificationCompat.Builder(this, OmashareApp.CHANNEL_OFFERS)
             .setContentTitle("Receive files?")
             .setContentText("$from wants to send $names")
             .setSmallIcon(android.R.drawable.stat_sys_download)
             .setContentIntent(open)
             .setAutoCancel(true)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setSilent(false)
             .addAction(0, "Accept", accept)
             .addAction(0, "Decline", decline)
-            .build()
-        getSystemService(NotificationManager::class.java).notify(session.hashCode(), n)
+        if (!inForeground && canPostFullScreenIntent()) {
+            builder.setFullScreenIntent(open, true)
+        }
+        getSystemService(NotificationManager::class.java).notify(session.hashCode(), builder.build())
+        if (!inForeground) {
+            val launch = offerPopupIntent(session, from, files)
+            Handler(Looper.getMainLooper()).post {
+                if (ShareStore.isUiForeground()) return@post
+                runCatching { startActivity(launch) }
+            }
+        }
+    }
+
+    private fun offerPopupIntent(
+        session: String,
+        from: String,
+        files: List<ShareStore.OfferedFile>,
+    ): Intent {
+        val names = ArrayList<String>(files.size)
+        val sizes = LongArray(files.size)
+        files.forEachIndexed { index, file ->
+            names.add(file.name)
+            sizes[index] = file.size
+        }
+        return Intent(this, IncomingOfferActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra(EXTRA_SESSION, session)
+            putExtra(EXTRA_ALIAS, from)
+            putStringArrayListExtra(EXTRA_FILE_NAMES, names)
+            putExtra(EXTRA_FILE_SIZES, sizes)
+        }
+    }
+
+    private fun canPostFullScreenIntent(): Boolean {
+        if (Build.VERSION.SDK_INT < 34) return true
+        return getSystemService(NotificationManager::class.java)?.canUseFullScreenIntent() == true
     }
 
     private fun cancelOfferNotification(session: String) {
@@ -791,8 +845,26 @@ class ShareService : Service(), EventSink {
         runCatching { node?.destroy() }
         node = null
         instance = null
-        ShareStore.setSharing(false)
+        publishSharing(false)
         ShareStore.setStatus("Sharing stopped")
+    }
+
+    private fun publishSharing(on: Boolean) {
+        ShareStore.setSharing(on)
+        val app = applicationContext
+        val refresh = Runnable {
+            runCatching {
+                TileService.requestListeningState(
+                    app,
+                    ComponentName(app, ShareTileService::class.java),
+                )
+            }
+        }
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            refresh.run()
+        } else {
+            Handler(Looper.getMainLooper()).post(refresh)
+        }
     }
 
     private fun notification(text: String): Notification {
@@ -820,6 +892,9 @@ class ShareService : Service(), EventSink {
         const val ACTION_SEND = "org.omashare.app.service.SEND"
         const val ACTION_STOP = "org.omashare.app.service.STOP"
         const val EXTRA_SESSION = "session"
+        const val EXTRA_ALIAS = "from_alias"
+        const val EXTRA_FILE_NAMES = "file_names"
+        const val EXTRA_FILE_SIZES = "file_sizes"
         const val EXTRA_PEER = "peer"
         const val EXTRA_PATHS = "paths"
         private const val NOTIFY_SHARE = 1
@@ -839,7 +914,12 @@ class ShareService : Service(), EventSink {
         }
 
         fun stop(context: android.content.Context) {
-            context.startService(Intent(context, ShareService::class.java).setAction(ACTION_STOP))
+            // A Quick Settings click is a background context. startService() is rejected there,
+            // so the stop never arrives and discovery keeps running.
+            androidx.core.content.ContextCompat.startForegroundService(
+                context,
+                Intent(context, ShareService::class.java).setAction(ACTION_STOP),
+            )
         }
 
         fun send(context: android.content.Context, peerId: String, paths: List<String>) {

@@ -1,13 +1,18 @@
 package org.omashare.app.ui
 
 import android.Manifest
+import android.app.StatusBarManager
+import android.content.ComponentName
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.widget.Toast
+import androidx.annotation.RequiresApi
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -19,8 +24,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import org.omashare.app.BuildConfig
+import org.omashare.app.R
 import androidx.core.content.ContextCompat
 import org.omashare.app.service.ShareService
+import org.omashare.app.service.ShareTileService
 import org.omashare.app.service.ShareStore
 import org.omashare.app.share.FileOpener
 import org.omashare.app.share.FileStager
@@ -68,6 +75,7 @@ class MainActivity : ComponentActivity() {
                             appTheme = theme
                             ThemePreferences.save(this, theme)
                         },
+                        onAddQuickSettingsTile = { requestAddQuickSettingsTile() },
                         onBack = { showSettings = false },
                     )
                 } else {
@@ -106,15 +114,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        setIntent(intent)
         handleShareIntent(intent)
     }
 
     override fun onResume() {
         super.onResume()
+        ShareStore.setUiForeground(true)
         handler.post(pollPeers)
     }
 
     override fun onPause() {
+        ShareStore.setUiForeground(false)
         handler.removeCallbacks(pollPeers)
         super.onPause()
     }
@@ -144,38 +155,63 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handleShareIntent(intent: Intent?) {
-        when (intent?.action) {
-            Intent.ACTION_SEND -> {
-                val uri = if (Build.VERSION.SDK_INT >= 33) {
-                    intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
-                } else {
-                    @Suppress("DEPRECATION")
-                    intent.getParcelableExtra(Intent.EXTRA_STREAM)
+        if (intent != null &&
+            (intent.action == Intent.ACTION_SEND || intent.action == Intent.ACTION_SEND_MULTIPLE)
+        ) {
+            val uris = collectShareUris(intent)
+            if (uris.isNotEmpty()) {
+                for (uri in uris) {
+                    runCatching {
+                        contentResolver.takePersistableUriPermission(
+                            uri,
+                            Intent.FLAG_GRANT_READ_URI_PERMISSION,
+                        )
+                    }
                 }
-                if (uri != null) {
-                    ShareStore.setShareSheet(true)
-                    ShareStore.setStatus("Copying files into the app…")
-                    io.execute { FileStager.stage(this, listOf(uri)) }
-                }
-            }
-            Intent.ACTION_SEND_MULTIPLE -> {
-                val uris = if (Build.VERSION.SDK_INT >= 33) {
-                    intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
-                } else {
-                    @Suppress("DEPRECATION")
-                    intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM)
-                }
-                if (!uris.isNullOrEmpty()) {
-                    ShareStore.setShareSheet(true)
-                    ShareStore.setStatus("Copying files into the app…")
-                    io.execute { FileStager.stage(this, uris) }
-                }
+                ShareStore.setShareSheet(true)
+                ShareStore.setStatus("Copying files into the app…")
+                io.execute { FileStager.stage(this, uris) }
             }
         }
         val metered = intent?.getStringExtra("metered_session")
         if (metered != null) {
             io.execute { ShareService.node()?.consentMetered(metered, true) }
         }
+    }
+
+    private fun collectShareUris(intent: Intent): List<Uri> {
+        val fromStream = when (intent.action) {
+            Intent.ACTION_SEND -> listOfNotNull(streamUri(intent))
+            Intent.ACTION_SEND_MULTIPLE -> streamUris(intent)
+            else -> emptyList()
+        }
+        if (fromStream.isNotEmpty()) return fromStream
+        val clip = intent.clipData ?: return emptyList()
+        val out = mutableListOf<Uri>()
+        for (i in 0 until clip.itemCount) {
+            val uri = clip.getItemAt(i)?.uri ?: continue
+            out.add(uri)
+        }
+        return out
+    }
+
+    private fun streamUri(intent: Intent): Uri? {
+        return if (Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableExtra(Intent.EXTRA_STREAM)
+        }
+    }
+
+    private fun streamUris(intent: Intent): List<Uri> {
+        val uris = if (Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableArrayListExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
+        }
+        return uris?.filterNotNull().orEmpty()
     }
 
     private fun ensurePermsThenStart() {
@@ -187,6 +223,43 @@ class MainActivity : ComponentActivity() {
         } else {
             ShareStore.setStatus("Grant nearby / notification permissions")
             requestPerms.launch(missing.toTypedArray())
+        }
+    }
+
+    private fun requestAddQuickSettingsTile() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            requestAddQuickSettingsTileApi33()
+        }
+    }
+
+    @RequiresApi(33)
+    private fun requestAddQuickSettingsTileApi33() {
+        val manager = getSystemService(StatusBarManager::class.java) ?: run {
+            Toast.makeText(this, R.string.qs_tile_add_failed, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val component = ComponentName(this, ShareTileService::class.java)
+        val icon = Icon.createWithResource(this, R.drawable.ic_qs_share)
+        runCatching {
+            manager.requestAddTileService(
+                component,
+                getString(R.string.qs_tile_label),
+                icon,
+                mainExecutor,
+            ) { result ->
+                val message = when (result) {
+                    StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ADDED ->
+                        R.string.qs_tile_added
+                    StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_ALREADY_ADDED ->
+                        R.string.qs_tile_already_added
+                    StatusBarManager.TILE_ADD_REQUEST_RESULT_TILE_NOT_ADDED ->
+                        R.string.qs_tile_not_added
+                    else -> R.string.qs_tile_add_failed
+                }
+                Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+            }
+        }.onFailure {
+            Toast.makeText(this, R.string.qs_tile_add_failed, Toast.LENGTH_SHORT).show()
         }
     }
 

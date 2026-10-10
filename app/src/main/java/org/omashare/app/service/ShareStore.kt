@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import java.util.ArrayDeque
 
 object ShareStore {
     data class Peer(
@@ -55,6 +56,16 @@ object ShareStore {
     private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
+    @Volatile private var uiForeground = false
+    private val offerLock = Any()
+    private val closedSessions = ArrayDeque<String>()
+
+    fun setUiForeground(foreground: Boolean) {
+        uiForeground = foreground
+    }
+
+    fun isUiForeground(): Boolean = uiForeground
+
     fun setSharing(on: Boolean) {
         _state.update { it.copy(sharingOn = on) }
     }
@@ -100,7 +111,15 @@ object ShareStore {
     }
 
     fun setIncoming(offer: IncomingOffer?) {
-        _state.update { it.copy(incoming = offer) }
+        synchronized(offerLock) {
+            if (offer != null) {
+                if (isClosedLocked(offer.sessionId)) return
+                _state.update { it.copy(incoming = offer) }
+                return
+            }
+            _state.value.incoming?.sessionId?.let { rememberClosedLocked(it) }
+            _state.update { it.copy(incoming = null) }
+        }
     }
 
     fun setTransfer(transfer: TransferUi?) {
@@ -108,10 +127,21 @@ object ShareStore {
     }
 
     fun clearIncomingIf(sessionId: String) {
-        _state.update {
-            if (it.incoming?.sessionId == sessionId) it.copy(incoming = null) else it
+        synchronized(offerLock) {
+            rememberClosedLocked(sessionId)
+            _state.update {
+                if (it.incoming?.sessionId == sessionId) it.copy(incoming = null) else it
+            }
         }
     }
+
+    private fun rememberClosedLocked(sessionId: String) {
+        if (closedSessions.contains(sessionId)) return
+        closedSessions.addLast(sessionId)
+        while (closedSessions.size > 32) closedSessions.removeFirst()
+    }
+
+    private fun isClosedLocked(sessionId: String): Boolean = closedSessions.contains(sessionId)
 
     fun addHistory(entry: HistoryEntry) {
         _state.update {

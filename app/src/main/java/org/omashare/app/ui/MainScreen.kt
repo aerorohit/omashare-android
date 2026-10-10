@@ -1,5 +1,6 @@
 package org.omashare.app.ui
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -16,29 +17,22 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -64,6 +58,7 @@ fun MainScreen(
     val canSend = state.staged.isNotEmpty() &&
         state.selectedPeerId != null &&
         state.transfer == null
+    val quietStatus = state.status.takeIf { isQuietStatus(it) }
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -73,99 +68,105 @@ fun MainScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .statusBarsPadding()
-                .padding(horizontal = 16.dp),
+                .navigationBarsPadding(),
         ) {
-            Header(
-                sharingOn = state.sharingOn,
-                onStopSharing = onStopSharing,
-                onStartSharing = onStartSharing,
-                onOpenSettings = onOpenSettings,
-            )
+            Column(modifier = Modifier.padding(horizontal = 16.dp)) {
+                Header(
+                    sharingOn = state.sharingOn,
+                    onStopSharing = onStopSharing,
+                    onStartSharing = onStartSharing,
+                    onOpenSettings = onOpenSettings,
+                )
+                if (quietStatus != null) {
+                    Text(
+                        text = quietStatus,
+                        color = if (isFailedStatus(quietStatus)) MochaRed else MochaMuted,
+                        fontSize = 13.sp,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            }
             Spacer(Modifier.height(8.dp))
             Hairline()
-            Spacer(Modifier.height(16.dp))
 
-            // Top: file selection
-            OutlinedButton(
-                onClick = onSelectFiles,
+            Column(
                 modifier = Modifier
+                    .weight(1f)
                     .fillMaxWidth()
-                    .height(48.dp),
-                shape = OmashareCardShape,
-                colors = ButtonDefaults.outlinedButtonColors(
-                    contentColor = MochaAccent,
-                ),
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp),
             ) {
-                Text("Select files")
-            }
-            if (state.staged.isNotEmpty()) {
-                Spacer(Modifier.height(12.dp))
-                SelectionCard(staged = state.staged, onClear = onClearSelection)
-            }
-
-            val transfer = state.transfer
-            if (transfer != null) {
-                Spacer(Modifier.height(12.dp))
-                TransferBlock(transfer = transfer, onCancel = onCancel)
-            } else if (isTransientStatus(state.status)) {
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    text = state.status,
-                    color = MochaMuted,
-                    fontSize = 13.sp,
-                )
-            }
-
-            Spacer(Modifier.height(16.dp))
-            Text(
-                text = "Nearby",
-                color = MochaMuted,
-                fontSize = 13.sp,
-            )
-            Spacer(Modifier.height(8.dp))
-
-            // Middle: nearby devices (scrollable, takes remaining space above dock)
-            if (state.peers.isEmpty()) {
-                Box(
+                Spacer(Modifier.height(16.dp))
+                OutlinedButton(
+                    onClick = onSelectFiles,
                     modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    contentAlignment = Alignment.TopCenter,
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    shape = OmashareCardShape,
+                    border = BorderStroke(1.dp, MochaOverlay),
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        contentColor = MochaText,
+                    ),
                 ) {
+                    Text("Select files")
+                }
+                if (state.staged.isNotEmpty()) {
+                    Spacer(Modifier.height(16.dp))
+                    SelectionCard(staged = state.staged, onClear = onClearSelection)
+                }
+
+                val transfer = state.transfer
+                if (transfer != null) {
+                    Spacer(Modifier.height(16.dp))
+                    TransferBlock(transfer = transfer, onCancel = onCancel)
+                }
+
+                Spacer(Modifier.height(16.dp))
+                SectionLabel("Nearby")
+                Spacer(Modifier.height(8.dp))
+                if (state.peers.isEmpty()) {
                     Text(
                         text = "Waiting for devices on this network…",
                         color = MochaMuted,
-                        modifier = Modifier.padding(vertical = 24.dp),
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(vertical = 8.dp),
                     )
-                }
-            } else {
-                LazyColumn(
-                    modifier = Modifier.weight(1f),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    items(state.peers, key = { it.endpointId }) { peer ->
-                        PeerRow(
-                            peer = peer,
-                            selected = peer.endpointId == state.selectedPeerId,
-                            onClick = { onPeerSelected(peer) },
-                        )
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        state.peers.forEach { peer ->
+                            PeerRow(
+                                peer = peer,
+                                selected = peer.endpointId == state.selectedPeerId,
+                                onClick = { onPeerSelected(peer) },
+                            )
+                        }
                     }
                 }
-            }
 
-            // Bottom dock: fixed Send + scrollable History
-            Spacer(Modifier.height(12.dp))
-            Column(modifier = Modifier.navigationBarsPadding()) {
+                Spacer(Modifier.height(16.dp))
                 Button(
                     onClick = onSend,
                     enabled = canSend,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp),
+                    elevation = ButtonDefaults.buttonElevation(
+                        defaultElevation = 0.dp,
+                        pressedElevation = 0.dp,
+                        focusedElevation = 0.dp,
+                        hoveredElevation = 0.dp,
+                        disabledElevation = 0.dp,
+                    ),
+                    border = BorderStroke(
+                        1.dp,
+                        if (canSend) MochaAccent else MochaOverlay,
+                    ),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = MochaAccent,
                         contentColor = MochaBackground,
-                        disabledContainerColor = MochaOverlay,
+                        disabledContainerColor = MochaBackground,
                         disabledContentColor = MochaMuted,
                     ),
                     shape = OmashareCardShape,
@@ -174,13 +175,16 @@ fun MainScreen(
                         state.peers.find { it.endpointId == id }?.alias
                     }
                     Text(
-                        if (label != null) "Send to $label" else "Send",
+                        text = if (label != null) "Send to $label" else "Send",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                 }
                 HistorySection(
                     history = state.history,
                     onOpenEntry = onOpenHistoryEntry,
                 )
+                Spacer(Modifier.height(16.dp))
             }
         }
         state.incoming?.let { offer ->
@@ -193,7 +197,12 @@ fun MainScreen(
     }
 }
 
-private fun isTransientStatus(status: String): Boolean {
+private fun isFailedStatus(status: String): Boolean {
+    val lower = status.lowercase()
+    return lower.contains("fail") || lower.contains("could not")
+}
+
+private fun isQuietStatus(status: String): Boolean {
     if (status.isEmpty()) return false
     if (status.startsWith("Saved ")) return false
     if (status == "Sent") return false
@@ -208,58 +217,26 @@ private fun Header(
     onStartSharing: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
-    var menu by remember { mutableStateOf(false) }
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             text = "Omashare",
             color = MochaText,
             fontSize = 22.sp,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),
         )
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.clickable { menu = true },
-        ) {
-            Box(
-                modifier = Modifier
-                    .padding(end = 8.dp)
-                    .size(8.dp)
-                    .clip(CircleShape)
-                    .background(if (sharingOn) MochaGreen else MochaMuted),
-            )
-            Text(
-                text = if (sharingOn) "sharing on" else "sharing off",
-                color = if (sharingOn) MochaGreen else MochaMuted,
-                fontSize = 13.sp,
-            )
-            Text(
-                text = "  ⋮",
-                color = MochaMuted,
-                fontSize = 18.sp,
-            )
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                if (sharingOn) {
-                    DropdownMenuItem(
-                        text = { Text("Stop sharing") },
-                        onClick = {
-                            menu = false
-                            onStopSharing()
-                        },
-                    )
-                } else {
-                    DropdownMenuItem(
-                        text = { Text("Start sharing") },
-                        onClick = {
-                            menu = false
-                            onStartSharing()
-                        },
-                    )
-                }
-            }
-        }
+        SharingPill(
+            sharingOn = sharingOn,
+            onClick = { if (sharingOn) onStopSharing() else onStartSharing() },
+        )
+        Spacer(Modifier.width(16.dp))
         IconButton(
             onClick = onOpenSettings,
             modifier = Modifier.size(40.dp),
@@ -274,6 +251,38 @@ private fun Header(
 }
 
 @Composable
+private fun SharingPill(
+    sharingOn: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .border(1.dp, MochaOverlay, OmasharePillShape)
+            .clip(OmasharePillShape)
+            .clickable(role = Role.Button, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(8.dp)
+                .background(
+                    if (sharingOn) MochaGreen else MochaMuted,
+                    CircleShape,
+                ),
+        )
+        Text(
+            text = if (sharingOn) "sharing" else "paused",
+            color = if (sharingOn) MochaText else MochaMuted,
+            fontSize = 13.sp,
+            maxLines = 1,
+            softWrap = false,
+        )
+    }
+}
+
+@Composable
 private fun PeerRow(
     peer: ShareStore.Peer,
     selected: Boolean,
@@ -283,10 +292,9 @@ private fun PeerRow(
     val deviceIcon = if (isMobile) "📱" else "💻"
     val kindLabel = peer.deviceKind.ifEmpty { "unknown" }
     val sourceLabel = when (peer.source) {
-        "bluetooth" -> "bt"
-        "mdns", "native_dns_sd" -> "mdns"
-        "multicast", "subnet_scan" -> "lan"
-        else -> ""
+        "" -> ""
+        "bluetooth" -> "Bluetooth"
+        else -> "LAN"
     }
     val badge = if (sourceLabel.isEmpty()) kindLabel else "$kindLabel · $sourceLabel"
     Row(
@@ -295,13 +303,13 @@ private fun PeerRow(
             .background(MochaSurface, OmashareCardShape)
             .then(
                 if (selected) {
-                    Modifier.border(2.dp, MochaAccent, OmashareCardShape)
+                    Modifier.border(1.dp, MochaAccent, OmashareCardShape)
                 } else {
                     Modifier
                 },
             )
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 14.dp),
+            .padding(horizontal = 16.dp, vertical = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -314,12 +322,16 @@ private fun PeerRow(
                 text = peer.alias.ifEmpty { "device" },
                 color = if (selected) MochaAccent else MochaText,
                 fontSize = 16.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
             if (peer.addrs.isEmpty() && peer.source != "bluetooth") {
                 Text(
                     text = "waiting for address…",
                     color = MochaMuted,
                     fontSize = 13.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }
@@ -327,7 +339,9 @@ private fun PeerRow(
         Text(
             text = badge,
             color = MochaMuted,
-            fontSize = 11.sp,
+            fontSize = 13.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
             modifier = Modifier
                 .background(MochaOverlay, OmashareCardShape)
                 .padding(horizontal = 8.dp, vertical = 4.dp),
@@ -343,7 +357,12 @@ private fun TransferBlock(transfer: ShareStore.TransferUi, onCancel: () -> Unit)
     } else {
         (transfer.bytesDone.toFloat() / total).coerceIn(0f, 1f)
     }
-    Column {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MochaSurface, OmashareCardShape)
+            .padding(16.dp),
+    ) {
         if (transfer.fileNames.isNotEmpty()) {
             Text(
                 text = transfer.fileNames.joinToString(" · "),
@@ -354,25 +373,36 @@ private fun TransferBlock(transfer: ShareStore.TransferUi, onCancel: () -> Unit)
             )
             Spacer(Modifier.height(8.dp))
         }
-        LinearProgressIndicator(
-            progress = { progress },
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(4.dp),
-            color = MochaAccent,
-            trackColor = MochaOverlay,
-        )
+                .height(4.dp)
+                .background(MochaOverlay),
+        ) {
+            if (progress > 0f) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(progress)
+                        .height(4.dp)
+                        .background(MochaAccent),
+                )
+            }
+        }
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = progressLabel(transfer),
                 color = MochaYellow,
                 fontSize = 13.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            TextButton(onClick = onCancel) {
-                Text("Cancel", color = MochaRed)
-            }
+            QuietAction(
+                text = "Cancel",
+                color = MochaRed,
+                onClick = onCancel,
+            )
         }
     }
 }
@@ -391,14 +421,4 @@ private fun progressLabel(t: ShareStore.TransferUi): String {
     } else {
         "$direction ${FileStager.humanBytes(t.bytesDone)} / ${FileStager.humanBytes(t.bytesTotal)}$via"
     }
-}
-
-@Composable
-private fun Hairline() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(1.dp)
-            .background(MochaOverlay),
-    )
 }
