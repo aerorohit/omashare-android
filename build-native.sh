@@ -21,6 +21,9 @@ if [[ ! -d "$OMASHARE_ROOT" ]]; then
   exit 1
 fi
 cd "$OMASHARE_ROOT"
+if command -v rustup >/dev/null; then
+  rustup target add aarch64-linux-android
+fi
 cargo ndk -t arm64-v8a -P 26 -o "$REPO/app/src/main/jniLibs" -- build -p omashare-ffi --release
 SO="$REPO/app/src/main/jniLibs/arm64-v8a/libomashare_ffi.so"
 find "$REPO/app/src/main/jniLibs" -name "*.so" ! -name "libomashare_ffi.so" -delete
