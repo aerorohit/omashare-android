@@ -34,6 +34,9 @@ jobs:
 
       - name: Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action's default list still includes the removed "tools" package.
+          packages: platform-tools
 
       - name: SDK packages
         run: |
