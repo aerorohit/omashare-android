@@ -1,0 +1,1 @@
+The listing now matches the app: start a transfer nearby, then leave. It continues in the background, peer to peer and encrypted.
