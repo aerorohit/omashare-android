@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Omarchy mark, traced on its 20px grid and inset into the 66dp adaptive-icon safe circle. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M31.55,29.82h20.73v3.45h-20.73z M55.73,29.82h20.73v3.45h-20.73z M31.55,33.27h3.45v3.45h-3.45z M55.73,33.27h10.36v3.45h-10.36z M73,33.27h3.45v3.45h-3.45z M31.55,36.73h3.45v13.82h-3.45z M31.55,54h3.45v17.27h-3.45z M73,36.73h3.45v34.55h-3.45z M38.45,36.73h31.09v31.09h-31.09z M31.55,71.27h20.73v3.45h-20.73z M55.73,71.27h20.73v3.45h-20.73z M55.73,74.73h3.45v3.45h-3.45z" />
+</vector>
