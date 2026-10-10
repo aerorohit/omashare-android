@@ -6,4 +6,4 @@ Files you choose to send are transferred to the device you select. Received file
 
 To find nearby devices, the app broadcasts and listens on the local network and, when Bluetooth is allowed, advertises a short presence message. That message is the device name and the addresses needed to connect. It is not used to locate you.
 
-If the local network cannot carry the file, the transfer may continue through the Iroh relay network. The file bytes are encrypted for the receiving device. Turn sharing off in the app or in quick settings and Omashare stops listening.
+The transfer is peer to peer. The file is encrypted for the receiving device. If the two devices cannot reach each other directly, the transfer may continue through an Iroh relay. That relay forwards encrypted traffic. It does not store the file and it cannot read it. Turn sharing off in the app or in quick settings and Omashare stops listening.

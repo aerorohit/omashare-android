@@ -12,19 +12,23 @@ Changelog: https://github.com/aerorohit/omashare-android/releases
 
 Name: Omashare
 AutoName: Omashare
-Summary: Send files to a nearby Linux computer or Android phone
+Summary: Start a transfer nearby. It keeps going over mobile data.
 Description: |-
-    Omashare sends files between your devices. A Linux computer and an
-    Android phone, or two phones. There is no account. The other person
-    accepts before a file is saved.
+    Start a transfer with someone nearby, then walk away. The file keeps
+    moving in the background, over mobile data if you leave Wi-Fi. You do
+    not have to stay next to each other until it finishes.
 
-    Turn sharing on while you are exchanging files, then turn it off.
-    Nearby devices appear from the local network or from Bluetooth.
-    Bluetooth is only used to discover a device. The file is transferred
-    over the network.
+    The transfer is peer to peer and encrypted. The file goes from one
+    device to the other. No server keeps a copy. On the same Wi-Fi that
+    path is the local network, so large files are fast. If you leave
+    Wi-Fi, the transfer continues over mobile data. A relay is used only
+    to connect the two devices when they cannot reach each other
+    directly. It cannot read the file.
 
-    Share from another app by choosing Omashare in the share sheet.
-    Accepted files are saved in Downloads/Omashare.
+    Two phones can do this with each other, and a phone can do it with a
+    Linux computer running Omashare. The other person accepts before
+    anything is saved. Send from Omashare, or from the share menu in
+    another app. Accepted files are saved in Downloads/Omashare.
 
 RepoType: git
 Repo: https://github.com/aerorohit/omashare-android.git

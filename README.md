@@ -4,9 +4,15 @@
 
 # Omashare
 
-Omashare sends files between your devices. A Linux computer and an Android phone, or two phones. There is no account. The other person accepts before a file is saved.
+Start a transfer with someone nearby, then walk away. The file keeps moving in the background, over mobile data if you leave Wi-Fi. You do not have to stand next to each other until it finishes.
 
-The Linux program is [omashare](https://github.com/aerorohit/omashare). This page is the Android app.
+The transfer is peer to peer. The file goes from one device straight to the other. There is no account server, and no server keeps a copy. The connection is encrypted, so anything in between cannot read the file. On the same Wi-Fi that path is the local network, which is why large files are fast. If you walk out of range, the two devices find another path, including over mobile data, and the transfer continues.
+
+When a direct path is not available, a relay helps the two devices reach each other. It forwards encrypted traffic. It does not store the file, and it cannot open it. Discovery itself stays on the local network or Bluetooth.
+
+Two phones can do this with each other, and a phone can do it with a Linux computer running [omashare](https://github.com/aerorohit/omashare). The other person accepts before anything is saved. Accepted files land in Downloads, in `Omashare`, not locked inside the app.
+
+Find someone on the local network, or over Bluetooth when you are not on the same Wi-Fi. Bluetooth is only how you meet. The file still travels over the network. Send one file or several, from Omashare or from the share menu in another app. Turn discovery off from the app or the quick settings tile when you are not exchanging files. That stops the scanning. A transfer that is already running keeps going if you leave the app.
 
 ## Install
 
@@ -32,15 +38,11 @@ Not listed yet. The file to upload is the `.aab` from the same GitHub release. A
 
 ## Use
 
-Turn sharing on with the control at the top of the app, or with the Omashare tile in quick settings. Sharing looks for nearby devices, so turn it off when you are done. That stops discovery and the ongoing notification.
+Turn sharing on with the control at the top of the app, or with the Omashare tile in quick settings. Nearby devices show whether they were found on the local network or over Bluetooth.
 
-Devices on the same Wi-Fi show up under Nearby, marked LAN. A device seen over Bluetooth is marked Bluetooth. Bluetooth only helps the phones find each other. The file itself still transfers over the network.
+Tap **Select files**, tap a device, then **Send**. Or share from another app and pick Omashare. The files are already selected. Choose a device and send.
 
-To send, tap **Select files**, tap a device, then **Send**. You can also share from another app and pick Omashare. The files are already selected. Choose a device and send.
-
-When someone sends you a file, accept or decline on the notification. If Omashare is open, the same choice appears in the app. Accepted files are saved in the Downloads folder, in `Omashare`.
-
-Tap a finished transfer in History to open that file. Settings has the theme, a way to add the quick settings tile, and a short about section.
+When someone sends you a file, accept or decline on the notification. You can leave the app after that. The transfer continues, including after you leave Wi-Fi. Tap a finished transfer in History to open the file.
 
 ## Permissions
 
