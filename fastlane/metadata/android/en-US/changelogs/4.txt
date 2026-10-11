@@ -1,0 +1,1 @@
+Location access is limited to Android 12 and older. Newer versions use the nearby Wi-Fi permission.
