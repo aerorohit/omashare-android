@@ -1,0 +1,3 @@
+[submodule "omashare"]
+	path = omashare
+	url = https://github.com/aerorohit/omashare.git

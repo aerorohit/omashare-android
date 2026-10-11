@@ -67,7 +67,7 @@ JDK 17 or 21, Android SDK 35, and NDK `27.2.12479018`. Gradle 8.11 does not run 
 
 ```bash
 export JAVA_HOME=/path/to/jdk-21   # when java -version is 26 or newer
-./build-native.sh                  # sibling ../omashare, or set OMASHARE_ROOT
+./build-native.sh                  # submodule omashare/, sibling ../omashare, or OMASHARE_ROOT
 ./gradlew :app:assembleDebug
 ```
 
@@ -107,13 +107,13 @@ Artifacts land in `dist/out/`. `./scripts/signing-cert.sh` prints the certificat
 Ship it by tagging the commit whose `versionName` in `app/build.gradle.kts` matches the tag, with `versionCode` higher than the previous release.
 
 ```bash
-# versionName is 0.1.3, versionCode is 4
-git tag v0.1.3
-git push origin v0.1.3
+# versionName is 0.1.4, versionCode is 5
+git tag v0.1.4
+git push origin v0.1.4
 ```
 
-[`.github/workflows/release.yml`](.github/workflows/release.yml) builds the native library, signs the APK and the AAB, and attaches both to the GitHub release. The tag must match `versionName` (`v0.1.3` for `0.1.3`).
+[`.github/workflows/release.yml`](.github/workflows/release.yml) builds the native library from the `omashare` submodule, signs the APK and the AAB, and attaches both to the GitHub release. The tag must match `versionName` (`v0.1.4` for `0.1.4`).
 
-**F-Droid.** After `v0.1.0` exists, open a merge request on [fdroiddata](https://gitlab.com/fdroid/fdroiddata) adding `fdroid/org.omashare.app.yml`. Pin `srclibs` to the `omashare` commit that this app was built with. F-Droid compiles from source and usually signs with its own key, which is why that install does not update a sideloaded APK. Store text is in `fastlane/metadata/android/en-US/`.
+**F-Droid.** After a tag exists, open a merge request on [fdroiddata](https://gitlab.com/fdroid/fdroiddata) adding `fdroid/org.omashare.app.yml`. The native code is the `omashare` git submodule. F-Droid compiles from source and usually signs with its own key, which is why that install does not update a sideloaded APK. Store text is in `fastlane/metadata/android/en-US/`.
 
 **Play.** In Play Console, create the app, upload `omashare-*.aab`, and use the [privacy policy](PRIVACY.md) URL on GitHub (`https://github.com/aerorohit/omashare-android/blob/main/PRIVACY.md`) until you have a site. Play App Signing wraps the upload key, so Play installs also stay on their own update track. Bump `versionCode` for every upload.

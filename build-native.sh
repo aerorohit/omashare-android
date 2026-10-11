@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")" && pwd)"
-OMASHARE_ROOT="${OMASHARE_ROOT:-$REPO/../omashare}"
+if [[ -n "${OMASHARE_ROOT:-}" ]]; then
+  :
+elif [[ -f "$REPO/omashare/Cargo.toml" ]]; then
+  OMASHARE_ROOT="$REPO/omashare"
+else
+  OMASHARE_ROOT="$REPO/../omashare"
+fi
 if [[ -f "$OMASHARE_ROOT/.cargo/env" ]]; then
   # rustup was installed with CARGO_HOME in the Rust workspace
   # shellcheck disable=SC1091
@@ -17,7 +23,7 @@ if [[ ! -d "$ANDROID_NDK_HOME" ]]; then
 fi
 if [[ ! -d "$OMASHARE_ROOT" ]]; then
   echo "Omashare Rust workspace not found: $OMASHARE_ROOT" >&2
-  echo "Set OMASHARE_ROOT to the sibling omashare repo." >&2
+  echo "Set OMASHARE_ROOT, or run git submodule update --init." >&2
   exit 1
 fi
 cd "$OMASHARE_ROOT"

@@ -1,7 +1,6 @@
-# Draft for a fdroiddata merge request. It is not live until that request is merged.
-# Before submitting, replace the srclib commit with the omashare revision this tag was
-# built against, and set AllowedAPKSigningKeys from ./scripts/signing-cert.sh if the
-# GitHub APK and the F-Droid APK should be the same binary.
+# Draft only. The live recipe is the fdroiddata merge request.
+# Native code is the omashare git submodule. Set AllowedAPKSigningKeys from
+# ./scripts/signing-cert.sh if a later build should match this signature.
 Categories:
   - Connectivity
 License: MIT
@@ -34,25 +33,26 @@ RepoType: git
 Repo: https://github.com/aerorohit/omashare-android.git
 
 Builds:
-  - versionName: 0.1.3
-    versionCode: 4
-    commit: v0.1.3
+  - versionName: 0.1.4
+    versionCode: 5
+    commit: v0.1.4
     subdir: app
+    submodules: true
     sudo:
       - apt-get update
-      - apt-get install -y --no-install-recommends curl build-essential pkg-config
+      - apt-get install -y rustup build-essential pkg-config
     gradle:
       - yes
-    srclibs:
-      - Omashare::https://github.com/aerorohit/omashare.git::main
-    prebuild:
-      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable
-      - bash -lc 'source "$$HOME/.cargo/env" && cargo install cargo-ndk --locked && NDK=$$(echo "$$ANDROID_HOME"/ndk/*) && ANDROID_NDK_HOME="$$NDK" OMASHARE_ROOT="$$Omashare$$" ./build-native.sh'
+    build:
+      - rustup default stable
+      - rustup target add aarch64-linux-android
+      - cargo install cargo-ndk@4.1.2 --locked
+      - export ANDROID_NDK_HOME=$$NDK$$
+      - cd ..
+      - ./build-native.sh
     ndk: r27c
-    scanignore:
-      - app/src/main/jniLibs
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: 0.1.3
-CurrentVersionCode: 4
+CurrentVersion: 0.1.4
+CurrentVersionCode: 5
