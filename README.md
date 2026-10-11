@@ -107,12 +107,12 @@ Artifacts land in `dist/out/`. `./scripts/signing-cert.sh` prints the certificat
 Ship it by tagging the commit whose `versionName` in `app/build.gradle.kts` matches the tag, with `versionCode` higher than the previous release.
 
 ```bash
-# versionName is 0.1.1, versionCode is 2
-git tag v0.1.1
-git push origin v0.1.1
+# versionName is 0.1.2, versionCode is 3
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
-[`.github/workflows/release.yml`](.github/workflows/release.yml) builds the native library, signs the APK and the AAB, and attaches both to the GitHub release. The tag must match `versionName` (`v0.1.1` for `0.1.1`).
+[`.github/workflows/release.yml`](.github/workflows/release.yml) builds the native library, signs the APK and the AAB, and attaches both to the GitHub release. The tag must match `versionName` (`v0.1.2` for `0.1.2`).
 
 **F-Droid.** After `v0.1.0` exists, open a merge request on [fdroiddata](https://gitlab.com/fdroid/fdroiddata) adding `fdroid/org.omashare.app.yml`. Pin `srclibs` to the `omashare` commit that this app was built with. F-Droid compiles from source and usually signs with its own key, which is why that install does not update a sideloaded APK. Store text is in `fastlane/metadata/android/en-US/`.
 

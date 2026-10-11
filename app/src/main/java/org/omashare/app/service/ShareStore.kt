@@ -67,7 +67,13 @@ object ShareStore {
     fun isUiForeground(): Boolean = uiForeground
 
     fun setSharing(on: Boolean) {
-        _state.update { it.copy(sharingOn = on) }
+        _state.update {
+            if (on) {
+                it.copy(sharingOn = true)
+            } else {
+                it.copy(sharingOn = false, peers = emptyList(), selectedPeerId = null)
+            }
+        }
     }
 
     fun setStatus(text: String) {
@@ -76,6 +82,8 @@ object ShareStore {
 
     fun setPeers(peers: List<Peer>) {
         _state.update {
+            // A nearby snapshot can land after sharing is already off. Keep the list empty.
+            if (!it.sharingOn) return@update it
             val selected = it.selectedPeerId
             val stillValid = selected != null && peers.any { p -> p.endpointId == selected }
             it.copy(

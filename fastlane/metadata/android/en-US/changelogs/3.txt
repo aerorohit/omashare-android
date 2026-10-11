@@ -1,0 +1,1 @@
+Nearby devices leave the list when sharing is paused.

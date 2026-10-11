@@ -177,6 +177,8 @@ class ShareService : Service(), EventSink {
             startForeground(NOTIFY_SHARE, notification(msg))
             publishSharing(true)
             ShareStore.setStatus("Listening as ${Build.MODEL}")
+            // Discovery may have emitted before sharingOn flipped; pull the current snapshot.
+            refreshPeers()
         } catch (e: Exception) {
             val msg = "Node failed: ${e.message}"
             startForeground(NOTIFY_SHARE, notification(msg))
@@ -340,7 +342,11 @@ class ShareService : Service(), EventSink {
                 val session = obj.optString("session_id")
                 io.execute { runCatching { node?.consentMetered(session, true) } }
             }
-            "nearby_updated" -> applyNearby(obj.optJSONArray("peers") ?: JSONArray())
+            "nearby_updated" -> {
+                if (ShareStore.state.value.sharingOn) {
+                    applyNearby(obj.optJSONArray("peers") ?: JSONArray())
+                }
+            }
             "transfer_progress" -> {
                 val session = obj.optString("session_id")
                 val inbound = session !in outgoing
@@ -508,6 +514,7 @@ class ShareService : Service(), EventSink {
     }
 
     private fun applyNearby(arr: JSONArray) {
+        if (!ShareStore.state.value.sharingOn) return
         val byAlias = linkedMapOf<String, ShareStore.Peer>()
         for (i in 0 until arr.length()) {
             val p = arr.getJSONObject(i)
@@ -834,6 +841,9 @@ class ShareService : Service(), EventSink {
     }
 
     private fun teardown() {
+        // Clear peers before discovery stops so a late nearby_updated cannot refill the list.
+        publishSharing(false)
+        ShareStore.setStatus("Sharing stopped")
         nsd?.stop()
         nsd = null
         ble?.stop()
@@ -845,8 +855,6 @@ class ShareService : Service(), EventSink {
         runCatching { node?.destroy() }
         node = null
         instance = null
-        publishSharing(false)
-        ShareStore.setStatus("Sharing stopped")
     }
 
     private fun publishSharing(on: Boolean) {
